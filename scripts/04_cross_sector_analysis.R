@@ -111,7 +111,84 @@ df_all %>%
   ) %>%
   arrange(desc(pct_coverage))
 
-# ── 6. Cross-sector correlation matrices ──────────────────────────────────────
+# ── 6. Merge financials ───────────────────────────────────────────────────────
+
+# load financials from panel — already pivoted to long format in script 02
+df_panel_full <- readRDS('data/processed/df_panel_merged.rds')
+
+# extract just the financial variables
+financials <- df_panel_full %>%
+  distinct(bvdId, year, total_assets, operating_revenue, n_employees)
+
+# merge into df_all
+df_all <- df_all %>%
+  left_join(financials, by = c('bvdId', 'year'))
+
+# construct emissions intensity for all sectors
+df_all <- df_all %>%
+  mutate(
+    emissions_intensity = ifelse(
+      operating_revenue <= 0, NA, verified / operating_revenue
+    ),
+    log_emissions_intensity = log(emissions_intensity)
+  )
+
+# check coverage by sector
+df_all %>%
+  mutate(has_revenue = !is.na(operating_revenue)) %>%
+  group_by(sector) %>%
+  summarise(
+    n = n(),
+    pct_revenue = round(mean(has_revenue) * 100, 1)
+  )
+
+df_all %>%
+  filter(phase >= 3) %>%
+  mutate(has_revenue = !is.na(operating_revenue)) %>%
+  group_by(sector) %>%
+  summarise(
+    n = n(),
+    pct_revenue = round(mean(has_revenue) * 100, 1)
+  )
+
+
+# Testing other variables for deminominator to see if they have better coverage  
+
+df_all %>%
+  filter(phase >= 3) %>%
+  mutate(
+    has_assets = !is.na(total_assets),
+    has_emp = !is.na(n_employees),
+    has_revenue = !is.na(operating_revenue)
+  ) %>%
+  group_by(sector) %>%
+  summarise(
+    n = n(),
+    pct_assets = round(mean(has_assets) * 100, 1),
+    pct_emp = round(mean(has_emp) * 100, 1),
+    pct_revenue = round(mean(has_revenue) * 100, 1)
+  )
+
+# ownership distribution — full power sector panel
+df_panel %>%
+  summarise(
+    n = n(),
+    mean_state_pct = round(mean(state_ownership_pct, na.rm = TRUE), 1),
+    pct_state_owned = round(mean(state_owned_binary == 1, na.rm = TRUE) * 100, 1),
+    pct_private = round(mean(state_owned_binary == 0, na.rm = TRUE) * 100, 1)
+  )
+
+# ownership distribution — revenue subsample only
+df_panel %>%
+  filter(!is.na(operating_revenue), operating_revenue > 0) %>%
+  summarise(
+    n = n(),
+    mean_state_pct = round(mean(state_ownership_pct, na.rm = TRUE), 1),
+    pct_state_owned = round(mean(state_owned_binary == 1, na.rm = TRUE) * 100, 1),
+    pct_private = round(mean(state_owned_binary == 0, na.rm = TRUE) * 100, 1)
+  )
+
+# ── 7. Cross-sector correlation matrices ──────────────────────────────────────
 
 # combined — all sectors together
 cor_vars_all <- df_all %>%
@@ -135,7 +212,7 @@ corrplot(cor_matrix_all,
          mar = c(0,0,1,0))
 dev.off()
 
-# ── 7. Separated by sector ────────────────────────────────────────────────────
+# ── 8. Separated by sector ────────────────────────────────────────────────────
 sectors_to_plot <- c('Power', 'Refining', 'Steel/Metal', 
                      'Pulp/Paper', 'Cement')
 
