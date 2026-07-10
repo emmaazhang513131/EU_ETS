@@ -126,3 +126,85 @@ n_distinct(df_panel$bvdId)
 
 # ── 11. Save ──────────────────────────────────────────────────────────────────
 saveRDS(df_panel, 'data/processed/df_panel_merged.rds')
+
+# new data
+
+library(readxl)
+
+orbis_sh_new <- read_excel('data/raw/Export_1.xlsx', sheet = 'Results')
+
+names(orbis_sh_new) %>% head(20)
+nrow(orbis_sh_new)
+
+head(orbis_sh_new$...1, 10)
+
+# also check remaining column names
+names(orbis_sh_new)
+
+i exported each value to a distinct cell i hope that's okayThat's fine for the shareholder name and type columns — but for the Direct % columns with biennial dates it means all the date columns will be spread across separate columns rather than rows, similar to your first export.
+So you'll get something like:
+BvD ID | SH1_Name | SH1_Type | SH1_Direct_2006 | SH1_Direct_2008 | SH2_Name | SH2_Type | SH2_Direct_2006...
+This is actually workable — it's wide format but we can pivot it to long in R. The key question is whether "each value to a distinct cell" gave you multiple shareholders per firm spread across columns, or still just one shareholder per row.
+When it downloads, load it and check:
+  rorbis_sh_new <- read_excel('data/raw/orbis_sh_new.xlsx', sheet = 'Results') %>%
+  filter(!is.na(`BvD ID number`))
+
+nrow(orbis_sh_new)
+n_distinct(orbis_sh_new$`BvD ID number`)
+names(orbis_sh_new) %>% head(30)
+If nrow equals n_distinct(BvD ID number) — one row per firm, shareholders in columns. If nrow is much larger — multiple rows per firm, which is what we want.
+Tell me what you see when it downloads.i named it Export_1 and it'ss in raw now. can we explore it first to make ssure it got multiple shareholdersrlibrary(readxl)
+
+orbis_sh_new <- read_excel('data/raw/Export_1.xlsx', sheet = 'Results') %>%
+  filter(!is.na(`BvD ID number`))
+
+nrow(orbis_sh_new)
+n_distinct(orbis_sh_new$`BvD ID number`)
+names(orbis_sh_new) %>% head(40)
+Tell me the row count vs distinct firm count and the first 40 column names — that'll tell us immediately whether we got multiple shareholders per firm and whether the biennial date columns are there.Error in filter():
+  ℹ In argument: !is.na(BvD ID number).
+Caused by error:
+  ! object 'BvD ID number' not found
+Run rlang::last_trace() to see where the error occurred.
+There were 50 or more warnings (use warnings() to see the first 50)The column name is probably slightly different — check what columns actually loaded:
+  rorbis_sh_new <- read_excel('data/raw/Export_1.xlsx', sheet = 'Results')
+
+names(orbis_sh_new) %>% head(20)
+nrow(orbis_sh_new)
+
+# also check remaining column names
+names(orbis_sh_new)
+nrow(orbis_sh_new)
+n_distinct(orbis_sh_new$...1)
+
+
+# rename ...1 to bvdId
+orbis_sh_new <- orbis_sh_new %>%
+  rename(bvdId = `...1`) %>%
+  filter(!is.na(bvdId))
+
+#second export
+orbis_sh_2 <- read_excel('data/raw/Export_2.xlsx', sheet = 'Results') %>%
+  rename(bvdId = `...1`) %>%
+  filter(!is.na(bvdId))
+
+nrow(orbis_sh_2)
+n_distinct(orbis_sh_2$bvdId)
+
+# stack both batches
+orbis_sh_all <- bind_rows(orbis_sh_new, orbis_sh_2)
+
+nrow(orbis_sh_all)
+n_distinct(orbis_sh_all$bvdId)
+
+# check Enel now
+orbis_sh_all %>%
+  filter(grepl("ENEL SPA", `Company name Latin alphabet`, ignore.case = TRUE)) %>%
+  select(`Company name Latin alphabet`, `SH - Name`, `SH - Type`,
+         `SH - Direct % 01/2006`, `SH - Direct % 01/2012`,
+         `SH - Direct % 01/2022`) %>%
+  print(width = Inf)
+
+
+
+
