@@ -270,7 +270,7 @@ df_clean %>%
   arrange(coverage) %>%
   print(n = 30)
 
-# concerning for GR (19%), IT (78%), GB (84%), IE (78%), esspecially Greece
+# concerning for GR (19%), IT (78%), GB (84%), IE (78%), especially Greece
 
 # how many observations remain if we restrict to has_bvd only
 # and how many unique installations
@@ -283,3 +283,22 @@ df_clean %>%
   )
 
 saveRDS(df_clean, 'data/processed/df_clean_with_bvd.rds')
+
+# split BvD IDs into two batches for Orbis upload
+bvd_ids <- df_clean %>%
+  filter(!is.na(bvdId) & bvdId != '') %>%
+  distinct(bvdId)
+
+# split in half
+halfway <- floor(nrow(bvd_ids) / 2)
+
+bvd_batch1 <- bvd_ids[1:halfway, ]
+bvd_batch2 <- bvd_ids[(halfway + 1):nrow(bvd_ids), ]
+
+# check sizes
+nrow(bvd_batch1)
+nrow(bvd_batch2)
+
+# export both
+write.csv(bvd_batch1, 'data/processed/bvd_ids_batch1.csv', row.names = FALSE)
+write.csv(bvd_batch2, 'data/processed/bvd_ids_batch2.csv', row.names = FALSE)

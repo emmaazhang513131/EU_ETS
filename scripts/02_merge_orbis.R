@@ -127,84 +127,194 @@ n_distinct(df_panel$bvdId)
 # ── 11. Save ──────────────────────────────────────────────────────────────────
 saveRDS(df_panel, 'data/processed/df_panel_merged.rds')
 
-# new data
+# ── 12. Load and parse new shareholder export (Export_1 and Export_2) ─────────
 
 library(readxl)
 
-orbis_sh_new <- read_excel('data/raw/Export_1.xlsx', sheet = 'Results')
+#reading in new export from orbis
 
-names(orbis_sh_new) %>% head(20)
-nrow(orbis_sh_new)
+orbis_sh_1 <- read_excel('data/raw/Export_1.xlsx', sheet = 'Results')
+orbis_sh_2 <- read_excel('data/raw/Export_2.xlsx', sheet = 'Results')
 
-head(orbis_sh_new$...1, 10)
-
-# also check remaining column names
-names(orbis_sh_new)
-
-i exported each value to a distinct cell i hope that's okayThat's fine for the shareholder name and type columns — but for the Direct % columns with biennial dates it means all the date columns will be spread across separate columns rather than rows, similar to your first export.
-So you'll get something like:
-BvD ID | SH1_Name | SH1_Type | SH1_Direct_2006 | SH1_Direct_2008 | SH2_Name | SH2_Type | SH2_Direct_2006...
-This is actually workable — it's wide format but we can pivot it to long in R. The key question is whether "each value to a distinct cell" gave you multiple shareholders per firm spread across columns, or still just one shareholder per row.
-When it downloads, load it and check:
-  rorbis_sh_new <- read_excel('data/raw/orbis_sh_new.xlsx', sheet = 'Results') %>%
-  filter(!is.na(`BvD ID number`))
-
-nrow(orbis_sh_new)
-n_distinct(orbis_sh_new$`BvD ID number`)
-names(orbis_sh_new) %>% head(30)
-If nrow equals n_distinct(BvD ID number) — one row per firm, shareholders in columns. If nrow is much larger — multiple rows per firm, which is what we want.
-Tell me what you see when it downloads.i named it Export_1 and it'ss in raw now. can we explore it first to make ssure it got multiple shareholdersrlibrary(readxl)
-
-orbis_sh_new <- read_excel('data/raw/Export_1.xlsx', sheet = 'Results') %>%
-  filter(!is.na(`BvD ID number`))
-
-nrow(orbis_sh_new)
-n_distinct(orbis_sh_new$`BvD ID number`)
-names(orbis_sh_new) %>% head(40)
-Tell me the row count vs distinct firm count and the first 40 column names — that'll tell us immediately whether we got multiple shareholders per firm and whether the biennial date columns are there.Error in filter():
-  ℹ In argument: !is.na(BvD ID number).
-Caused by error:
-  ! object 'BvD ID number' not found
-Run rlang::last_trace() to see where the error occurred.
-There were 50 or more warnings (use warnings() to see the first 50)The column name is probably slightly different — check what columns actually loaded:
-  rorbis_sh_new <- read_excel('data/raw/Export_1.xlsx', sheet = 'Results')
-
-names(orbis_sh_new) %>% head(20)
-nrow(orbis_sh_new)
-
-# also check remaining column names
-names(orbis_sh_new)
-nrow(orbis_sh_new)
-n_distinct(orbis_sh_new$...1)
-
-
-# rename ...1 to bvdId
-orbis_sh_new <- orbis_sh_new %>%
+orbis_sh_1_clean <- read_excel('data/raw/Export_1.xlsx', sheet = 'Results') %>%
   rename(bvdId = `...1`) %>%
+  fill(bvdId, `Company name Latin alphabet`, .direction = 'down') %>%
+  filter(!is.na(`SH - Name`))
+
+orbis_sh_2_clean <- orbis_sh_2 %>%
+  rename(bvdId = `...1`) %>%
+  # forward fill firm identifiers down through shareholder rows
+  fill(bvdId, `Company name Latin alphabet`, .direction = 'down') %>%
+  # now drop rows that are truly empty (no shareholder data)
+  filter(!is.na(`SH - Name`))
+
+orbis_sh_1_clean <- orbis_sh_1_clean %>%
+  mutate(across(starts_with('Number of employees'), as.character),
+         across(starts_with('Operating revenue'), as.character),
+         across(starts_with('SH - Direct %'), as.character))
+
+orbis_sh_2_clean <- orbis_sh_2_clean %>%
+  mutate(across(starts_with('Number of employees'), as.character),
+         across(starts_with('Operating revenue'), as.character),
+         across(starts_with('SH - Direct %'), as.character))
+
+# get BvD IDs from original orbis_raw which has proper BvD IDs
+bvd_lookup <- orbis_raw %>%
+  select(bvdId = `BvD ID number`, 
+         `Company name Latin alphabet`) %>%
   filter(!is.na(bvdId))
 
-#second export
-orbis_sh_2 <- read_excel('data/raw/Export_2.xlsx', sheet = 'Results') %>%
-  rename(bvdId = `...1`) %>%
+# merge BvD IDs into new shareholder data using company name
+orbis_sh_1_fixed <- orbis_sh_1_clean %>%
+  select(-bvdId) %>%  # drop the wrong row number column
+  left_join(bvd_lookup, by = 'Company name Latin alphabet')
+
+orbis_sh_2_fixed <- orbis_sh_2_clean %>%
+  select(-bvdId) %>%
+  left_join(bvd_lookup, by = 'Company name Latin alphabet')
+
+# stack both fixed exports
+orbis_sh_all <- bind_rows(
+  orbis_sh_1_fixed %>%
+    mutate(across(starts_with('SH - Direct %'), as.character)),
+  orbis_sh_2_fixed %>%
+    mutate(across(starts_with('SH - Direct %'), as.character))
+) %>%
   filter(!is.na(bvdId))
-
-nrow(orbis_sh_2)
-n_distinct(orbis_sh_2$bvdId)
-
-# stack both batches
-orbis_sh_all <- bind_rows(orbis_sh_new, orbis_sh_2)
 
 nrow(orbis_sh_all)
 n_distinct(orbis_sh_all$bvdId)
 
-# check Enel now
-orbis_sh_all %>%
-  filter(grepl("ENEL SPA", `Company name Latin alphabet`, ignore.case = TRUE)) %>%
-  select(`Company name Latin alphabet`, `SH - Name`, `SH - Type`,
-         `SH - Direct % 01/2006`, `SH - Direct % 01/2012`,
-         `SH - Direct % 01/2022`) %>%
-  print(width = Inf)
+# check state shareholder type distribution
+table(orbis_sh_all$`SH - Type`) %>%
+  sort(decreasing = TRUE) %>%
+  head(10)
 
+# ── construct time-varying state ownership ────────────────────────────────────
+state_types <- c("Public authority, state, government", "Public")
 
+# pivot SH Direct % columns to long format
+sh_long <- orbis_sh_all %>%
+  select(bvdId, `Company name Latin alphabet`, 
+         `SH - Name`, `SH - Type`,
+         starts_with('SH - Direct %')) %>%
+  pivot_longer(
+    cols = starts_with('SH - Direct %'),
+    names_to = 'date',
+    values_to = 'sh_direct_pct'
+  ) %>%
+  mutate(
+    year = as.integer(str_extract(date, '\\d{4}')),
+    sh_direct_pct = suppressWarnings(
+      as.numeric(na_if(na_if(sh_direct_pct, 'n.a.'), '-'))
+    ),
+    is_state = `SH - Type` %in% state_types
+  )
 
+# construct state ownership per firm per year
+# sum all government shareholder stakes, cap at 100
+state_ownership_tv <- sh_long %>%
+  group_by(bvdId, `Company name Latin alphabet`, year) %>%
+  summarise(
+    state_ownership_pct_tv = min(
+      sum(sh_direct_pct[is_state], na.rm = TRUE), 
+      100
+    ),
+    state_owned_binary_tv = as.integer(any(is_state & !is.na(sh_direct_pct))),
+    n_gov_shareholders = sum(is_state & !is.na(sh_direct_pct)),
+    .groups = 'drop'
+  )
 
+# check distribution
+summary(state_ownership_tv$state_ownership_pct_tv)
+table(state_ownership_tv$state_owned_binary_tv)
+
+# how many firms show ownership changes over time
+state_ownership_tv %>%
+  group_by(bvdId) %>%
+  summarise(
+    min_own = min(state_ownership_pct_tv, na.rm = TRUE),
+    max_own = max(state_ownership_pct_tv, na.rm = TRUE),
+    changed = min_own != max_own
+  ) %>%
+  filter(changed) %>%
+  nrow()
+
+# expand biennial snapshots to annual panel
+state_ownership_annual <- state_ownership_tv %>%
+  group_by(bvdId) %>%
+  complete(year = 2008:2023) %>%
+  arrange(bvdId, year) %>%
+  fill(state_ownership_pct_tv, state_owned_binary_tv,
+       .direction = 'down') %>%
+  ungroup()
+
+# merge into df_panel
+df_panel <- df_panel %>%
+  left_join(
+    state_ownership_annual %>%
+      select(bvdId, year, state_ownership_pct_tv, state_owned_binary_tv),
+    by = c('bvdId', 'year')
+  )
+
+# compare old vs new
+df_panel %>%
+  summarise(
+    mean_old = mean(state_ownership_pct, na.rm = TRUE),
+    mean_new = mean(state_ownership_pct_tv, na.rm = TRUE),
+    cor_old_new = cor(state_ownership_pct, state_ownership_pct_tv,
+                      use = 'complete.obs')
+  )
+
+# distribution of new time-varying variable
+quantile(df_panel$state_ownership_pct_tv, 
+         probs = c(0, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99, 1),
+         na.rm = TRUE)
+
+# how many observations are exactly zero
+mean(df_panel$state_ownership_pct_tv == 0, na.rm = TRUE)
+
+# how many have some state ownership
+mean(df_panel$state_ownership_pct_tv > 0, na.rm = TRUE)
+
+# distribution among state-owned firms only
+df_panel %>%
+  filter(state_ownership_pct_tv > 0) %>%
+  pull(state_ownership_pct_tv) %>%
+  summary()
+
+# distribution of time-varying state ownership
+df_panel %>%
+  filter(!is.na(state_ownership_pct_tv),
+         state_ownership_pct_tv > 0) %>%
+  ggplot(aes(x = state_ownership_pct_tv)) +
+  geom_histogram(bins = 50, fill = 'steelblue', color = 'white', alpha = 0.8) +
+  labs(
+    title = 'Distribution of state ownership % (time-varying)',
+    subtitle = 'Firms with any state ownership only (excluding zeros)',
+    x = 'State ownership %',
+    y = 'Count'
+  ) +
+  theme_minimal()
+
+# compare old vs new side by side
+df_panel %>%
+  filter(!is.na(state_ownership_pct),
+         !is.na(state_ownership_pct_tv)) %>%
+  select(state_ownership_pct, state_ownership_pct_tv) %>%
+  pivot_longer(everything(), names_to = 'variable', values_to = 'value') %>%
+  filter(value > 0) %>%
+  ggplot(aes(x = value, fill = variable)) +
+  geom_histogram(bins = 50, alpha = 0.6, position = 'identity') +
+  scale_fill_manual(values = c('#E8534A', '#3498DB'),
+                    labels = c('CSH (old)', 'SH time-varying (new)')) +
+  labs(
+    title = 'State ownership distribution: old vs new variable',
+    subtitle = 'Firms with any state ownership only',
+    x = 'State ownership %',
+    y = 'Count',
+    fill = 'Variable'
+  ) +
+  theme_minimal()
+
+saveRDS(df_panel, 'data/processed/df_panel_merged.rds')

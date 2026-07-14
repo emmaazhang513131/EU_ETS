@@ -222,3 +222,4 @@ df_all %>%
     n_firms = n_distinct(bvdId)
   ) %>%
   arrange(desc(n_firms))
+
