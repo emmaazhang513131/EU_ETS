@@ -222,6 +222,53 @@ sum(!is.na(good_matches_eic$eic_p))
 mean(!is.na(good_matches_eic$eic_p))
 
 
+# ── representativeness check of JRC matched sample ────────────────────────────
+df_panel_fuel <- df_panel %>%
+  left_join(
+    good_matches %>%
+      select(installation_id, fuel_type, dist_km) %>%
+      distinct(installation_id, .keep_all = TRUE),
+    by = 'installation_id'
+  ) %>%
+  mutate(matched = !is.na(fuel_type))
+
+# matched vs unmatched comparison
+rep_check <- df_panel_fuel %>%
+  group_by(matched) %>%
+  summarise(
+    n_obs          = n(),
+    n_installs     = n_distinct(installation_id),
+    mean_verified  = round(mean(verified, na.rm = TRUE)),
+    median_verified = round(median(verified, na.rm = TRUE)),
+    mean_state_own = round(mean(state_ownership_pct_tv, na.rm = TRUE), 2),
+    pct_state_owned = round(mean(state_ownership_pct_tv > 0, na.rm = TRUE), 3),
+    mean_surplus   = round(mean(surplus_norm, na.rm = TRUE), 3),
+    pct_foreign    = round(mean(foreign_owned, na.rm = TRUE), 3)
+  )
+
+print(rep_check, width = Inf)
+
+# country breakdown
+country_check <- df_panel_fuel %>%
+  group_by(registry_id, matched) %>%
+  summarise(n = n_distinct(installation_id), .groups = 'drop') %>%
+  pivot_wider(names_from = matched, values_from = n,
+              names_prefix = 'matched_') %>%
+  mutate(pct_matched = round(matched_TRUE / 
+                               (matched_TRUE + matched_FALSE) * 100, 1)) %>%
+  arrange(desc(pct_matched))
+
+print(country_check, n = 30)
+
+# save
+write_csv(rep_check, 'output/tables/jrc_representativeness.csv')
+write_csv(country_check, 'output/tables/jrc_country_coverage.csv')
+
+
+
+
+
+
 # ── 8. Pull ENTSO-E generation data ───────────────────────────────────────────
 
 # save EIC crosswalk for ENTSO-E query
@@ -236,17 +283,3 @@ nrow(eic_crosswalk)
 
 write_csv(eic_crosswalk, 'data/processed/eic_crosswalk.csv')
 
-install.packages('devtools')
-devtools::install_github('krose/entsoeapi')
-library(entsoeapi)
-install.packages('rlang')
-
-# set token
-token <- 'YOUR_TOKEN_HERE'
-
-# test on one plant first — Belchatow (Poland, large coal plant)
-# find its EIC code
-eic_crosswalk %>%
-  filter(registry_id == 'PL') %>%
-  select(install_name, name_jrc, eic_p, fuel_type) %>%
-  head(10)
