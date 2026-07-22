@@ -245,3 +245,40 @@ for (s in sectors_to_plot) {
 }
 
 dev.off()
+
+
+df_all %>%
+  filter(phase >= 3) %>%
+  mutate(
+    has_assets  = !is.na(total_assets),
+    has_emp     = !is.na(n_employees),
+    has_revenue = !is.na(operating_revenue)
+  ) %>%
+  group_by(sector) %>%
+  summarise(
+    n           = n(),
+    pct_assets  = round(mean(has_assets) * 100, 1),
+    pct_emp     = round(mean(has_emp) * 100, 1),
+    pct_revenue = round(mean(has_revenue) * 100, 1)
+  ) %>%
+  arrange(desc(pct_revenue))
+
+
+# how many firms show ownership changes in your Orbis data
+df_panel %>%
+  filter(!is.na(state_owned_binary)) %>%
+  arrange(bvdId, year) %>%
+  group_by(bvdId) %>%
+  mutate(ownership_change = state_owned_binary != lag(state_owned_binary)) %>%
+  filter(ownership_change == TRUE, !is.na(ownership_change)) %>%
+  summarise(n_changes = n()) %>%
+  nrow()
+
+library(readxl)
+orbis_raw <- bind_rows(
+  read_excel('data/raw/orbis_batch1.xlsx', sheet = 'Results'),
+  read_excel('data/raw/orbis_batch2.xlsx', sheet = 'Results')
+) %>%
+  filter(!is.na(`BvD ID number`))
+
+names(orbis_raw) %>% grep('Direct', ., value = TRUE)

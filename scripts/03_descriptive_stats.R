@@ -3,8 +3,158 @@ library(tidyverse)
 install.packages("corrplot")
 library(corrplot)
 
+#some helper functions
+
+# redefine ownership helper and colors
+ownership_levels <- c('Private (0%)', 'Majority state', 'Fully state (100%)')
+ownership_colors <- c(
+  'Private (0%)'       = '#E8534A',
+  'Majority state'     = '#2ECC71',
+  'Fully state (100%)' = '#3498DB'
+)
+
+make_ownership_group <- function(df) {
+  df %>%
+    mutate(
+      ownership_group = case_when(
+        state_ownership_pct == 0 ~ 'Private (0%)',
+        state_ownership_pct >= 50 & state_ownership_pct < 100 ~ 'Majority state',
+        state_ownership_pct == 100 ~ 'Fully state (100%)'
+      ),
+      ownership_group = factor(ownership_group, levels = ownership_levels)
+    ) %>%
+    filter(!is.na(ownership_group))
+}
+
 # ── 2. Load panel ─────────────────────────────────────────────────────────────
 df_panel <- readRDS('data/processed/df_panel_merged.rds')
+
+df_panel %>%
+  mutate(emissions_intensity = verified / operating_revenue) %>%
+  summarise(
+    n_total = n(),
+    n_nonmissing = sum(!is.na(emissions_intensity)),
+    n_missing = sum(is.na(emissions_intensity)),
+    pct_coverage = round(mean(!is.na(emissions_intensity)) * 100, 1)
+  )
+
+# missingness by phase
+df_panel %>%
+  mutate(emissions_intensity = verified / operating_revenue) %>%
+  group_by(phase) %>%
+  summarise(
+    n = n(),
+    pct_coverage = round(mean(!is.na(emissions_intensity)) * 100, 1)
+  )
+
+# missingness by country
+df_panel %>%
+  mutate(emissions_intensity = verified / operating_revenue) %>%
+  group_by(registry_id) %>%
+  summarise(
+    n = n(),
+    pct_coverage = round(mean(!is.na(emissions_intensity)) * 100, 1)
+  ) %>%
+  arrange(pct_coverage)
+
+# missingness by ownership type
+df_panel %>%
+  mutate(emissions_intensity = verified / operating_revenue) %>%
+  group_by(state_owned_binary) %>%
+  summarise(
+    n = n(),
+    pct_coverage = round(mean(!is.na(emissions_intensity)) * 100, 1)
+  )
+
+df_panel %>%
+  filter(phase >= 3) %>%
+  mutate(emissions_intensity = verified / operating_revenue) %>%
+  summarise(
+    n_total = n(),
+    n_nonmissing = sum(!is.na(emissions_intensity)),
+    pct_coverage = round(mean(!is.na(emissions_intensity)) * 100, 1)
+  )
+
+# ── construct emissions intensity ──────────────────────────────────────────────
+df_panel <- df_panel %>%
+  mutate(
+    emissions_intensity = ifelse(
+      operating_revenue <= 0, NA, verified / operating_revenue
+    ),
+    log_emissions_intensity = ifelse(
+      operating_revenue <= 0 | emissions_intensity <= 0, 
+      NA, log(emissions_intensity)
+    ),
+    log_verified = log(verified)
+  )
+
+# check how many negative/zero revenue observations
+sum(df_panel$operating_revenue <= 0, na.rm = TRUE)
+
+# recheck summary
+summary(df_panel$emissions_intensity)
+summary(df_panel$log_emissions_intensity)
+
+# check for remaining extreme outliers
+quantile(df_panel$emissions_intensity, 
+         probs = c(0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99),
+         na.rm = TRUE)
+
+# trim top 1% before logging
+p99 <- quantile(df_panel$emissions_intensity, 0.99, na.rm = TRUE)
+
+df_panel <- df_panel %>%
+  mutate(
+    emissions_intensity_trim = ifelse(emissions_intensity > p99, 
+                                      NA, emissions_intensity),
+    log_emissions_intensity = log(emissions_intensity_trim)
+  )
+
+summary(df_panel$log_emissions_intensity)
+
+# save updated panel
+saveRDS(df_panel, 'data/processed/df_panel_merged.rds')
+
+# plot log emissions intensity by ownership and phase
+df_panel %>%
+  filter(!is.na(log_emissions_intensity),
+         !is.na(state_ownership_pct),
+         between(log_emissions_intensity, -10, 2)) %>%
+  make_ownership_group() %>%
+  ggplot(aes(x = ownership_group, y = log_emissions_intensity,
+             fill = ownership_group)) +
+  geom_boxplot(alpha = 0.8, outlier.alpha = 0.1) +
+  facet_wrap(~phase) +
+  scale_fill_manual(values = ownership_colors) +
+  labs(
+    title = 'Log emissions intensity by ownership and phase',
+    subtitle = 'Log(verified emissions / operating revenue) — trimmed to [-10, 2]',
+    x = 'Ownership',
+    y = 'Log(tonnes CO2 / revenue)'
+  ) +
+  theme_minimal() +
+  theme(legend.position = 'none',
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave('output/figures/14_log_intensity_by_ownership_trimmed.png',
+       width = 12, height = 8, dpi = 300)
+
+$checked dropped
+df_panel %>%
+  filter(!is.na(log_emissions_intensity)) %>%
+  summarise(
+    total = n(),
+    kept = sum(between(log_emissions_intensity, -10, 2)),
+    dropped = sum(!between(log_emissions_intensity, -10, 2)),
+    pct_dropped = round(mean(!between(log_emissions_intensity, -10, 2)) * 100, 1)
+  )
+
+
+
+
+
+
+
 
 # quick look at key variables
 df_panel %>%
@@ -16,6 +166,48 @@ df_panel %>%
 
 # ── 3. Correlation matrix ─────────────────────────────────────────────────────
 library(corrplot)
+
+# ── updated correlation matrix with emissions intensity ────────────────────────
+cor_vars2 <- df_panel %>%
+  select(
+    surplus_norm,
+    log_verified,
+    log_emissions_intensity,
+    state_ownership_pct,
+    state_owned_binary,
+    guo_state,
+    foreign_owned
+  ) %>%
+  drop_na()
+
+nrow(cor_vars2)
+
+cor_matrix2 <- cor(cor_vars2)
+
+png('output/figures/15_correlation_matrix_v2.png',
+    width = 10, height = 8, units = 'in', res = 300)
+corrplot(cor_matrix2,
+         method = 'color',
+         type = 'upper',
+         addCoef.col = 'black',
+         number.cex = 0.7,
+         tl.cex = 0.7,
+         title = 'Correlation matrix v2: all dependent variables vs ownership',
+         mar = c(0,0,1,0))
+dev.off()
+
+df_panel %>%
+  filter(!is.na(log_verified),
+         !is.na(operating_revenue),
+         operating_revenue > 0) %>%
+  summarise(
+    n = n(),
+    n_firms = n_distinct(bvdId)
+  )
+
+
+
+
 
 # select key variables and drop NAs
 cor_vars <- df_panel %>%

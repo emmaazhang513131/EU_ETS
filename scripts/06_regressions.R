@@ -1,4 +1,5 @@
 library(fixest)
+library(here)
 
 #phase dummies
 
@@ -840,3 +841,78 @@ df_panel %>%
       mean(n_employees, na.rm = TRUE)
   ) %>%
   summary()
+
+
+# ── country FE, log_verified, with employees ──────────────────────────────────
+
+# load panel
+df_panel <- readRDS('data/processed/df_panel_merged.rds')
+
+# check it loaded correctly
+nrow(df_panel)
+names(df_panel) %>% grep('verified|ownership|eps', ., value = TRUE)
+
+# recreate phase dummies
+df_panel <- df_panel %>%
+  mutate(
+    phase3 = as.integer(phase == 3),
+    phase4 = as.integer(phase == 4)
+  )
+
+
+# pooled
+lv_c1 <- feols(log_verified ~ state_ownership_pct_tv +
+                 log(n_employees + 1) |
+                 registry_id + year,
+               data = df_panel, cluster = ~bvdId)
+
+lv_c2 <- feols(log_verified ~ state_ownership_pct_tv +
+                 eps + v2x_polyarchy +
+                 log(n_employees + 1) |
+                 registry_id + year,
+               data = df_panel, cluster = ~bvdId)
+
+lv_c3 <- feols(log_verified ~ state_ownership_pct_tv * eps +
+                 v2x_polyarchy +
+                 log(n_employees + 1) |
+                 registry_id + year,
+               data = df_panel, cluster = ~bvdId)
+
+# phase 2
+lv_c_p2 <- feols(log_verified ~ state_ownership_pct_tv * eps +
+                   v2x_polyarchy + log(n_employees + 1) |
+                   registry_id + year,
+                 data = df_panel %>% filter(phase == 2),
+                 cluster = ~bvdId)
+
+# phase 3
+lv_c_p3 <- feols(log_verified ~ state_ownership_pct_tv * eps +
+                   v2x_polyarchy + log(n_employees + 1) |
+                   registry_id + year,
+                 data = df_panel %>% filter(phase == 3),
+                 cluster = ~bvdId)
+
+# phase 4
+lv_c_p4 <- feols(log_verified ~ state_ownership_pct_tv +
+                   v2x_polyarchy + log(n_employees + 1) |
+                   registry_id + year,
+                 data = df_panel %>% filter(phase == 4),
+                 cluster = ~bvdId)
+
+modelsummary(
+  list('Baseline' = lv_c1, '+Policy' = lv_c2,
+       '+Interaction' = lv_c3,
+       'Phase 2' = lv_c_p2, 'Phase 3' = lv_c_p3,
+       'Phase 4' = lv_c_p4),
+  coef_map = c(
+    'state_ownership_pct_tv'     = 'State ownership %',
+    'state_ownership_pct_tv:eps' = 'State ownership × EPS',
+    'eps'                        = 'EPS',
+    'v2x_polyarchy'              = 'V-Dem polyarchy',
+    'log(n_employees + 1)'       = 'Log employees'
+  ),
+  stars = c('*' = 0.1, '**' = 0.05, '***' = 0.01),
+  gof_map = c('nobs', 'r.squared', 'adj.r.squared'),
+  title = 'Log verified emissions: country FE with employees control',
+  output = 'output/tables/table_lv_country_fe_employees.html'
+)
