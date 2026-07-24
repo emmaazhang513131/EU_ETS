@@ -265,10 +265,6 @@ write_csv(rep_check, 'output/tables/jrc_representativeness.csv')
 write_csv(country_check, 'output/tables/jrc_country_coverage.csv')
 
 
-
-
-
-
 # ── 8. Pull ENTSO-E generation data ───────────────────────────────────────────
 
 # save EIC crosswalk for ENTSO-E query

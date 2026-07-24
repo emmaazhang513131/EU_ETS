@@ -101,6 +101,8 @@ df_panel_merged <- df_panel_merged %>%
   mutate(national_tax = replace_na(national_tax, 0),
          combined_carbon_price = eua_price + national_tax)
 
+saveRDS(df_panel_merged, "data/processed/df_panel_merged.rds")   # <-- add this
+
 # correlations 
 
 df_panel_merged %>%
@@ -126,4 +128,5 @@ year_level_2 <- clean_data_2 %>%
   )
 
 cor.test(year_level_2$eps_mean, year_level_2$carbon_price_mean)
+
 
