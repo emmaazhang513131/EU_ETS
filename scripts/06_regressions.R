@@ -1423,3 +1423,370 @@ modelsummary(
   title = 'Market vs. non-market stringency: interaction with institutional quality',
   output = 'output/tables/table_market_nonmarket_institutions.html'
 )
+
+
+# ── reload and rebuild what you need ───────────────────────────────────────────
+library(tidyverse); library(fixest); library(modelsummary)
+
+df_panel <- readRDS("data/processed/df_panel_merged.rds") %>%
+  mutate(phase3 = as.integer(phase == 3), phase4 = as.integer(phase == 4))
+
+uses_gbr <- c("AT","BE","DE","DK","FR","NL","SE")
+
+df_panel <- df_panel %>%
+  mutate(gbr_strict = as.integer(country %in% uses_gbr))
+
+# ── NEW: country FE instead of installation FE, so the direct effect of 
+# country-fixed policy variables (NEC target, GBR) is actually estimable ──────
+
+nox_country <- feols(log_verified ~ state_ownership_pct_tv * nox_target_2020_29 + v2x_polyarchy |
+                       registry_id + year,
+                     data = df_panel, cluster = ~bvdId)
+
+gbr_country <- feols(log_verified ~ state_ownership_pct_tv * gbr_strict + v2x_polyarchy |
+                       registry_id + year,
+                     data = df_panel, cluster = ~bvdId)
+
+modelsummary(
+  list('NOx target (country FE)' = nox_country, 'GBR strict (country FE)' = gbr_country),
+  coef_map = c(
+    'state_ownership_pct_tv'                     = 'State ownership %',
+    'nox_target_2020_29'                          = 'NOx reduction target',
+    'state_ownership_pct_tv:nox_target_2020_29'  = 'Ownership × NOx target',
+    'gbr_strict'                                   = 'Uses GBR',
+    'state_ownership_pct_tv:gbr_strict'           = 'Ownership × GBR',
+    'v2x_polyarchy'                                = 'V-Dem polyarchy'
+  ),
+  stars = c('*' = 0.1, '**' = 0.05, '***' = 0.01),
+  gof_map = c('nobs', 'r.squared', 'adj.r.squared'),
+  fmt = fmt_decimal(5),
+  title = 'Country FE: direct effect of non-market policy instruments',
+  output = 'output/tables/table_nonmarket_country_fe.html'
+)
+
+
+
+
+nox_country <- feols(log_verified ~ state_ownership_pct_tv * nox_target_2020_29 + v2x_polyarchy |
+                       registry_id + year,
+                     data = df_panel, cluster = ~bvdId)
+
+
+df_panel <- readRDS("data/processed/df_panel_merged.rds") %>%
+  mutate(phase3 = as.integer(phase == 3), phase4 = as.integer(phase == 4))
+
+so2_country <- feols(log_verified ~ state_ownership_pct_tv * so2_target_2020_29 + v2x_polyarchy |
+                       registry_id + year,
+                     data = df_panel, cluster = ~bvdId)
+
+modelsummary(
+  list('NOx target (country FE)' = nox_country, 'SO2 target (country FE)' = so2_country),
+  coef_map = c(
+    'state_ownership_pct_tv'                     = 'State ownership %',
+    'nox_target_2020_29'                          = 'NOx reduction target',
+    'state_ownership_pct_tv:nox_target_2020_29'  = 'Ownership × NOx target',
+    'so2_target_2020_29'                          = 'SO2 reduction target',
+    'state_ownership_pct_tv:so2_target_2020_29'  = 'Ownership × SO2 target',
+    'v2x_polyarchy'                                = 'V-Dem polyarchy'
+  ),
+  stars = c('*' = 0.1, '**' = 0.05, '***' = 0.01),
+  gof_map = c('nobs', 'r.squared', 'adj.r.squared'),
+  fmt = fmt_decimal(5),
+  title = 'Country FE: NOx vs SO2 reduction targets',
+  output = 'output/tables/table_nox_so2_country_fe.html'
+)
+
+library(tidyverse); library(fixest); library(modelsummary)
+
+df_panel <- readRDS("data/processed/df_panel_merged.rds") %>%
+  mutate(phase3 = as.integer(phase == 3), phase4 = as.integer(phase == 4))
+
+nox1 <- feols(log_verified ~ state_ownership_pct_tv |
+                installation_id + year,
+              data = df_panel, cluster = ~bvdId)
+
+nox_phase <- feols(log_verified ~ 
+                     state_ownership_pct_tv +
+                     state_ownership_pct_tv:phase3 +
+                     state_ownership_pct_tv:phase4 +
+                     state_ownership_pct_tv:nox_target_2020_29 +
+                     nox_target_2020_29 + v2x_polyarchy |
+                     installation_id + year,
+                   data = df_panel, cluster = ~bvdId)
+
+so2_1 <- feols(log_verified ~ state_ownership_pct_tv |
+                 installation_id + year,
+               data = df_panel, cluster = ~bvdId)
+
+so2_phase <- feols(log_verified ~ 
+                     state_ownership_pct_tv +
+                     state_ownership_pct_tv:phase3 +
+                     state_ownership_pct_tv:phase4 +
+                     state_ownership_pct_tv:so2_target_2020_29 +
+                     so2_target_2020_29 + v2x_polyarchy |
+                     installation_id + year,
+                   data = df_panel, cluster = ~bvdId)
+
+
+
+
+
+modelsummary(
+  list(
+    'Baseline' = nox1, 'NOx +Phase' = nox_phase, 'SO2 +Phase' = so2_phase
+  ),
+  coef_map = c(
+    'state_ownership_pct_tv'                     = 'State ownership %',
+    'state_ownership_pct_tv:phase3'              = 'Ownership × Phase 3',
+    'state_ownership_pct_tv:phase4'              = 'Ownership × Phase 4',
+    'state_ownership_pct_tv:nox_target_2020_29'  = 'Ownership × NOx target',
+    'state_ownership_pct_tv:so2_target_2020_29'  = 'Ownership × SO2 target',
+    'nox_target_2020_29'                          = 'NOx target',
+    'so2_target_2020_29'                          = 'SO2 target',
+    'v2x_polyarchy'                                = 'V-Dem polyarchy'
+  ),
+  stars = c('*' = 0.1, '**' = 0.05, '***' = 0.01),
+  gof_map = c('nobs', 'r.squared', 'adj.r.squared'),
+  fmt = fmt_decimal(5),
+  title = 'Log verified emissions: NOx vs SO2 targets, installation FE',
+  output = 'output/tables/table_nox_so2_install_fe.html'
+)
+
+
+# by phase 
+
+
+nox_triple_phase <- feols(log_verified ~ 
+                            state_ownership_pct_tv +
+                            state_ownership_pct_tv:phase3 +
+                            state_ownership_pct_tv:phase4 +
+                            state_ownership_pct_tv:nox_target_2020_29 +
+                            state_ownership_pct_tv:nox_target_2020_29:phase3 +
+                            state_ownership_pct_tv:nox_target_2020_29:phase4 +
+                            nox_target_2020_29 + v2x_polyarchy |
+                            installation_id + year,
+                          data = df_panel, cluster = ~bvdId)
+
+so2_triple_phase <- feols(log_verified ~ 
+                            state_ownership_pct_tv +
+                            state_ownership_pct_tv:phase3 +
+                            state_ownership_pct_tv:phase4 +
+                            state_ownership_pct_tv:so2_target_2020_29 +
+                            state_ownership_pct_tv:so2_target_2020_29:phase3 +
+                            state_ownership_pct_tv:so2_target_2020_29:phase4 +
+                            so2_target_2020_29 + v2x_polyarchy |
+                            installation_id + year,
+                          data = df_panel, cluster = ~bvdId)
+
+summary(nox_triple_phase)
+summary(so2_triple_phase)
+
+
+df_panel %>%
+  distinct(country, year, eps, nox_target_2020_29, so2_target_2020_29) %>%
+  filter(!is.na(eps)) %>%
+  summarise(
+    cor_nox = cor(eps, nox_target_2020_29, use = "complete.obs"),
+    cor_so2 = cor(eps, so2_target_2020_29, use = "complete.obs")
+  )
+
+# using ambition variables 
+
+
+library(dplyr); library(tidyr); library(purrr); library(MASS)
+
+
+library(readr); library(dplyr)
+
+nec_raw <- read_tsv("data/raw/NEC_2026.csv",
+                    col_types = cols(value = col_double(), unit = col_character()))
+
+nec_clean <- nec_raw %>%
+  filter(pollutantName %in% c("NOx", "SOx", "PM2.5"),
+         parentSectorCode == "NATIONAL TOTAL") %>%
+  group_by(countryCode, year, pollutantName) %>%
+  summarise(value = sum(value, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::select(country = countryCode, year, pollutantName, value)
+
+
+# ---- SO2 only - this is the new part ----
+so2_trends <- nec_clean %>%
+  filter(pollutantName == "SOx", year >= 2010, year <= 2019, value > 0) %>%
+  group_by(country) %>%
+  filter(n() >= 7) %>%
+  ungroup() %>%
+  nest(data = -country) %>%
+  mutate(
+    model = map(data, ~ rlm(log(value) ~ year, data = .x)),
+    log_slope = map_dbl(model, ~ coef(.x)["year"])
+  ) %>%
+  dplyr::select(country, log_slope)
+
+so2_baseline_2005 <- nec_clean %>%
+  filter(pollutantName == "SOx", year == 2005) %>%
+  dplyr::select(country, baseline_2005 = value)
+
+so2_ambition_final <- so2_trends %>%
+  left_join(so2_baseline_2005, by = "country") %>%
+  mutate(
+    bau_2025 = baseline_2005 * exp(log_slope * (2025 - 2005)),
+    bau_pct_reduction = (baseline_2005 - bau_2025) / baseline_2005
+  ) %>%
+  left_join(df_panel_merged %>% dplyr::select(country, so2_target_2020_29) %>% distinct(), by = "country") %>%
+  mutate(so2_ambition_gap = so2_target_2020_29 - bau_pct_reduction) %>%
+  dplyr::select(country, so2_ambition_gap)
+
+print(so2_ambition_final, n = 30)
+
+nec_clean %>% filter(pollutantName == "SOx", country == "DE") %>% arrange(year) %>% print(n=20)
+
+df_panel_merged <- df_panel_merged %>%
+  dplyr::select(-any_of("so2_ambition_gap")) %>%
+  left_join(so2_ambition_final, by = "country")
+
+saveRDS(df_panel_merged, "data/processed/df_panel_merged.rds")
+
+
+df_panel <- readRDS("data/processed/df_panel_merged.rds") %>%
+  mutate(phase3 = as.integer(phase == 3), phase4 = as.integer(phase == 4))
+
+nox_amb_triple_phase <- feols(log_verified ~ 
+                                state_ownership_pct_tv +
+                                state_ownership_pct_tv:phase3 +
+                                state_ownership_pct_tv:phase4 +
+                                state_ownership_pct_tv:nox_ambition_gap +
+                                state_ownership_pct_tv:nox_ambition_gap:phase3 +
+                                state_ownership_pct_tv:nox_ambition_gap:phase4 +
+                                nox_ambition_gap + v2x_polyarchy |
+                                installation_id + year,
+                              data = df_panel, cluster = ~bvdId)
+
+so2_amb_triple_phase <- feols(log_verified ~ 
+                                state_ownership_pct_tv +
+                                state_ownership_pct_tv:phase3 +
+                                state_ownership_pct_tv:phase4 +
+                                state_ownership_pct_tv:so2_ambition_gap +
+                                state_ownership_pct_tv:so2_ambition_gap:phase3 +
+                                state_ownership_pct_tv:so2_ambition_gap:phase4 +
+                                so2_ambition_gap + v2x_polyarchy |
+                                installation_id + year,
+                              data = df_panel, cluster = ~bvdId)
+
+summary(nox_amb_triple_phase)
+summary(so2_amb_triple_phase)
+
+modelsummary(
+  list(
+    'NOx Ambition Gap' = nox_amb_triple_phase,
+    'SO2 Ambition Gap' = so2_amb_triple_phase
+  ),
+  coef_map = c(
+    'state_ownership_pct_tv'                                    = 'State ownership %',
+    'state_ownership_pct_tv:phase3'                             = 'Ownership × Phase 3',
+    'state_ownership_pct_tv:phase4'                             = 'Ownership × Phase 4',
+    'state_ownership_pct_tv:nox_ambition_gap'                  = 'Ownership × NOx ambition gap',
+    'state_ownership_pct_tv:phase3:nox_ambition_gap'           = 'Ownership × NOx gap × Phase 3',
+    'state_ownership_pct_tv:phase4:nox_ambition_gap'           = 'Ownership × NOx gap × Phase 4',
+    'state_ownership_pct_tv:so2_ambition_gap'                  = 'Ownership × SO2 ambition gap',
+    'state_ownership_pct_tv:phase3:so2_ambition_gap'           = 'Ownership × SO2 gap × Phase 3',
+    'state_ownership_pct_tv:phase4:so2_ambition_gap'           = 'Ownership × SO2 gap × Phase 4',
+    'nox_ambition_gap'                                          = 'NOx ambition gap',
+    'so2_ambition_gap'                                          = 'SO2 ambition gap',
+    'v2x_polyarchy'                                             = 'V-Dem polyarchy'
+  ),
+  stars = c('*' = 0.1, '**' = 0.05, '***' = 0.01),
+  gof_map = c('nobs', 'r.squared', 'adj.r.squared'),
+  fmt = fmt_decimal(5),
+  title = 'Log verified emissions: ambition-gap (trend-adjusted) non-market proxies, by phase',
+  output = 'output/tables/table_ambition_gap_phase_comparison.html'
+)
+
+
+df_panel %>%
+  distinct(country, year, eps, nox_ambition_gap, so2_ambition_gap) %>%
+  filter(!is.na(eps)) %>%
+  summarise(
+    cor_nox_amb = cor(eps, nox_ambition_gap, use = "complete.obs"),
+    cor_so2_amb = cor(eps, so2_ambition_gap, use = "complete.obs")
+  )
+
+
+
+# NOx ambition gap version, phase-decomposed
+nox_amb_triple_phase <- feols(log_verified ~ 
+                                state_ownership_pct_tv +
+                                state_ownership_pct_tv:phase3 +
+                                state_ownership_pct_tv:phase4 +
+                                state_ownership_pct_tv:nox_ambition_gap +
+                                state_ownership_pct_tv:nox_ambition_gap:phase3 +
+                                state_ownership_pct_tv:nox_ambition_gap:phase4 +
+                                nox_ambition_gap + v2x_polyarchy |
+                                installation_id + year,
+                              data = df_panel, cluster = ~bvdId)
+summary(nox_amb_triple_phase)
+
+df_panel %>% distinct(country, v2x_corr, v2x_polyarchy) %>% 
+  filter(country %in% c("ES", "PT"))
+
+
+
+
+so2_p2p3_epscontrol <- feols(log_verified ~ 
+                               state_ownership_pct_tv * so2_ambition_gap * phase3 +
+                               eps + v2x_polyarchy |
+                               installation_id + year,
+                             data = df_panel %>% filter(phase %in% c(2,3)),
+                             cluster = ~bvdId)
+summary(so2_p2p3_epscontrol)
+
+
+df_panel %>% filter(country %in% c("ES","PT")) %>%
+  group_by(phase) %>%
+  summarise(n_soe_installations = sum(state_owned_binary_tv == 1, na.rm=TRUE),
+            n_total = n())
+
+
+df_panel %>% filter(country %in% c("ES","PT"), phase == 2, state_owned_binary_tv == 1) %>%
+  distinct(installation_id, company_name)
+
+df_panel %>% filter(country %in% c("ES","PT"), phase == 3, state_owned_binary_tv == 1) %>%
+  distinct(installation_id, company_name)
+
+
+df_panel %>% filter(state_owned_binary_tv == 1) %>%
+  distinct(installation_id, company_name, country) %>%
+  filter(!grepl("power|electric|energy|generat|thermal|coal|gas", company_name, ignore.case = TRUE)) %>%
+  arrange(country)
+
+
+df_panel %>% filter(state_owned_binary_tv == 1) %>%
+  distinct(installation_id, company_name, country, nace, activity_id) %>%
+  count(activity_id, sort = TRUE)
+
+df_panel %>% distinct(activity_id, activity_type) %>% arrange(activity_id)
+
+
+df_panel %>% filter(installation_id %in% c("ES_1510","ES_203767","ES_205812","ES_210672",
+                                           "ES_214580","ES_90030","ES_90040","PT_194","PT_195")) %>%
+  distinct(installation_id, company_name, activity_id)
+
+df_panel %>% filter(state_owned_binary_tv == 1) %>%
+  distinct(nace, nace_id) %>%
+  arrange(nace)
+
+df_panel %>% distinct(nace) %>% count()
+df_panel %>% distinct(nace_id) %>% arrange(nace_id) %>% head(20)
+str(df_panel$nace)
+str(df_panel$nace_id)
+
+df_panel %>% distinct(activity_id) %>% arrange(activity_id)
+
+
+df_panel %>% filter(country %in% c("SE","DE"), phase == 2, state_owned_binary_tv == 1) %>%
+  distinct(installation_id, company_name, country)
+
+df_panel %>% filter(country %in% c("SE","DE"), phase == 2, state_owned_binary_tv == 1) %>%
+  summarise(n_installations = n_distinct(installation_id), n_companies = n_distinct(company_name))
+
+
+

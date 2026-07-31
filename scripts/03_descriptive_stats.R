@@ -548,3 +548,62 @@ ggsave('output/figures/12_coverage_vs_ownership.png',
 
 names(df_panel) %>% grep('ummul', ., value = TRUE, ignore.case = TRUE)
 
+
+# trends in ownership 
+
+
+library(dplyr); library(ggplot2)
+
+df_panel <- readRDS("data/processed/df_panel_merged.rds")
+
+ownership_trend <- df_panel %>%
+  filter(!is.na(state_ownership_pct_tv)) %>%
+  group_by(year) %>%
+  summarise(mean_ownership = mean(state_ownership_pct_tv, na.rm = TRUE),
+            median_ownership = median(state_ownership_pct_tv, na.rm = TRUE))
+
+ggplot(ownership_trend, aes(x = year, y = mean_ownership)) +
+  geom_line(color = "steelblue", linewidth = 1.2) +
+  geom_point(color = "steelblue", size = 2) +
+  labs(title = "Average State Ownership Share in EU ETS Power Sector",
+       x = "Year", y = "Mean State Ownership (%)") +
+  theme_minimal(base_size = 13)
+
+ggsave("output/figures/ownership_decline_trend.png", width = 8, height = 5, dpi = 300)
+
+ggplot(ownership_trend, aes(x = year)) +
+  geom_line(aes(y = mean_ownership, color = "Mean"), linewidth = 1.2) +
+  geom_line(aes(y = median_ownership, color = "Median"), linewidth = 1.2, linetype = "dashed") +
+  labs(title = "State Ownership Share Over Time: Mean vs Median",
+       x = "Year", y = "State Ownership (%)", color = "") +
+  theme_minimal(base_size = 13)
+
+install.packages("rnaturalearth")
+install.packages("rnaturalearthdata")
+library(sf); library(rnaturalearth); library(rnaturalearthdata); library(dplyr); library(ggplot2)
+
+# average ownership by country across full sample (or pick a specific year if you prefer)
+country_ownership <- df_panel %>%
+  filter(!is.na(state_ownership_pct_tv)) %>%
+  group_by(country) %>%
+  summarise(mean_ownership = mean(state_ownership_pct_tv, na.rm = TRUE))
+
+# get EU country boundaries
+europe_map <- ne_countries(scale = "medium", continent = "Europe", returnclass = "sf")
+
+# your panel uses ISO2 codes - match on that
+europe_map <- europe_map %>%
+  left_join(country_ownership, by = c("iso_a2" = "country"))
+
+ggplot(europe_map) +
+  geom_sf(aes(fill = mean_ownership), color = "white", linewidth = 0.2) +
+  coord_sf(xlim = c(-25, 45), ylim = c(34, 72)) +   # crop to European extent
+  scale_fill_gradient(low = "#fee8c8", high = "#b30000", na.value = "grey90",
+                      name = "State\nOwnership %") +
+  labs(title = "Average State Ownership Share by Country") +
+  theme_minimal(base_size = 13) +
+  theme(axis.text = element_blank(), axis.ticks = element_blank(), panel.grid = element_blank())
+
+ggsave("output/figures/ownership_map_eu.png", width = 9, height = 8, dpi = 300)
+
+
