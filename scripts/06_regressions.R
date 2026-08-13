@@ -1789,4 +1789,120 @@ df_panel %>% filter(country %in% c("SE","DE"), phase == 2, state_owned_binary_tv
   summarise(n_installations = n_distinct(installation_id), n_companies = n_distinct(company_name))
 
 
+#rebuilding 
+library(tidyverse)
+library(fixest)
+library(modelsummary)
 
+df_panel <- readRDS("data/processed/df_panel_merged.rds") %>%
+  mutate(phase3 = as.integer(phase == 3), phase4 = as.integer(phase == 4))
+
+price_phase_inter_full <- feols(
+  log_verified ~ 
+    state_ownership_pct_tv +
+    state_ownership_pct_tv:phase3 +
+    state_ownership_pct_tv:phase4 +
+    state_ownership_pct_tv:combined_carbon_price +
+    state_ownership_pct_tv:combined_carbon_price:phase3 +
+    state_ownership_pct_tv:combined_carbon_price:phase4 +
+    combined_carbon_price + v2x_polyarchy |
+    installation_id + year,
+  data = df_panel, cluster = ~bvdId
+)
+
+
+modelsummary(
+  list('Price × Phase' = price_phase_inter_full),
+  coef_map = c(
+    'state_ownership_pct_tv'                                = 'State ownership %',
+    'state_ownership_pct_tv:phase3'                          = 'Ownership × Phase 3',
+    'state_ownership_pct_tv:phase4'                          = 'Ownership × Phase 4',
+    'state_ownership_pct_tv:combined_carbon_price'          = 'Ownership × Price',
+    'state_ownership_pct_tv:phase3:combined_carbon_price'   = 'Ownership × Price × Phase 3',
+    'state_ownership_pct_tv:phase4:combined_carbon_price'   = 'Ownership × Price × Phase 4',
+    'combined_carbon_price'                                  = 'Combined carbon price',
+    'v2x_polyarchy'                                          = 'V-Dem polyarchy'
+  ),
+  stars = c('*' = 0.1, '**' = 0.05, '***' = 0.01),
+  gof_map = c('nobs', 'r.squared', 'adj.r.squared'),
+  fmt = fmt_decimal(5),
+  title = 'Log verified emissions: ownership × combined carbon price, by phase',
+  output = 'output/tables/table_price_phase_final.html'
+)
+
+names(coef(price_phase_inter_full))
+
+#combined tests 
+
+combined_test <- feols(log_verified ~ 
+                         state_ownership_pct_tv * combined_carbon_price +
+                         state_ownership_pct_tv * so2_ambition_gap +
+                         v2x_polyarchy |
+                         installation_id + year,
+                       data = df_panel, cluster = ~bvdId)
+summary(combined_test)
+
+
+combined_full <- feols(log_verified ~ 
+                         state_ownership_pct_tv +
+                         state_ownership_pct_tv:phase3 +
+                         state_ownership_pct_tv:phase4 +
+                         state_ownership_pct_tv:combined_carbon_price +
+                         state_ownership_pct_tv:combined_carbon_price:phase3 +
+                         state_ownership_pct_tv:combined_carbon_price:phase4 +
+                         state_ownership_pct_tv:so2_ambition_gap +
+                         state_ownership_pct_tv:so2_ambition_gap:phase3 +
+                         state_ownership_pct_tv:so2_ambition_gap:phase4 +
+                         combined_carbon_price + so2_ambition_gap + v2x_polyarchy |
+                         installation_id + year,
+                       data = df_panel, cluster = ~bvdId)
+summary(combined_full)
+
+# double check robustness for price in combined regression 
+
+# get the exact set of rows that survived the combined_full regression
+sample_ids <- df_panel %>%
+  filter(!is.na(state_ownership_pct_tv), !is.na(combined_carbon_price),
+         !is.na(so2_ambition_gap), !is.na(v2x_polyarchy), !is.na(log_verified)) %>%
+  pull(installation_id) %>% unique()
+
+df_panel_matched <- df_panel %>% filter(installation_id %in% sample_ids)
+
+price_only_matched <- feols(log_verified ~ 
+                              state_ownership_pct_tv +
+                              state_ownership_pct_tv:phase3 +
+                              state_ownership_pct_tv:phase4 +
+                              state_ownership_pct_tv:combined_carbon_price +
+                              state_ownership_pct_tv:combined_carbon_price:phase3 +
+                              state_ownership_pct_tv:combined_carbon_price:phase4 +
+                              combined_carbon_price + v2x_polyarchy |
+                              installation_id + year,
+                            data = df_panel_matched, cluster = ~bvdId)
+summary(price_only_matched)
+
+modelsummary(
+  list(
+    'Price only' = price_phase_inter_full,
+    'Price only (matched sample)' = price_only_matched,
+    'Price + SO2 (horse race)' = combined_full
+  ),
+  coef_map = c(
+    'state_ownership_pct_tv'                                = 'State ownership %',
+    'state_ownership_pct_tv:phase3'                          = 'Ownership × Phase 3',
+    'state_ownership_pct_tv:phase4'                          = 'Ownership × Phase 4',
+    'state_ownership_pct_tv:combined_carbon_price'          = 'Ownership × Price',
+    'state_ownership_pct_tv:phase3:combined_carbon_price'   = 'Ownership × Price × Phase 3',
+    'state_ownership_pct_tv:phase4:combined_carbon_price'   = 'Ownership × Price × Phase 4',
+    'state_ownership_pct_tv:so2_ambition_gap'                = 'Ownership × SO2 gap',
+    'state_ownership_pct_tv:phase3:so2_ambition_gap'        = 'Ownership × SO2 gap × Phase 3',
+    'state_ownership_pct_tv:phase4:so2_ambition_gap'        = 'Ownership × SO2 gap × Phase 4',
+    'combined_carbon_price'                                  = 'Combined carbon price',
+    'so2_ambition_gap'                                       = 'SO2 ambition gap',
+    'v2x_polyarchy'                                          = 'V-Dem polyarchy'
+  ),
+  stars = c('*' = 0.1, '**' = 0.05, '***' = 0.01),
+  gof_map = c('nobs', 'r.squared', 'adj.r.squared'),
+  fmt = fmt_decimal(5),
+  title = 'Market vs. non-market mechanism: price and SO2 ambition gap horse race',
+  output = 'output/tables/table_price_so2_horserace.html'
+)
