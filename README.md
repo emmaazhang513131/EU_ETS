@@ -5,6 +5,8 @@ state-owned enterprises respond differently than private firms to carbon pricing
 environmental regulation — originally built around the EU Emissions Trading System,
 later extended to India's PAT scheme as a developing-country comparison.
 
+Also starting a model below: https://www.overleaf.com/read/xhfjcfddtrnq#293206
+
 ---
 
 ## Research Question
