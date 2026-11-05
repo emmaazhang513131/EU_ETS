@@ -1,3 +1,29 @@
+# =============================================================================
+# 02_merge_orbis.R
+#
+# Merges Orbis firm-level and ownership data into the cleaned EUTL panel.
+# Builds TWO ownership variables (see chat for why both are kept):
+#   - state_ownership_pct / state_owned_binary   [OLD / ROBUSTNESS ONLY]
+#     Static, built from the original CSH (Controlling Shareholder) export.
+#   - state_ownership_pct_tv / state_owned_binary_tv   [PRIMARY]
+#     Time-varying, built from later SH (Shareholder) biennial exports
+#     (Export_1.xlsx / Export_2.xlsx), forward-filled to an annual panel.
+#     This is the ownership variable used in all main specifications.
+#
+# FIXES APPLIED (see chat):
+#   - orbis_sh_1 was read from disk, then immediately re-read from the same
+#     file again to build orbis_sh_1_clean, instead of being reused the way
+#     orbis_sh_2 correctly was. Fixed to build off the already-loaded object.
+#   - library(readxl) was loaded twice; removed the duplicate.
+#   - `SH - Direct %` was cast to character twice (once in the _clean step,
+#     again right before bind_rows()); removed the redundant second cast.
+#   - Two saveRDS() calls wrote to the same 'df_panel_merged.rds' filename --
+#     the first (right after the original EUTL+financials merge) was fully
+#     overwritten by the second (after the time-varying ownership merge)
+#     before anything else in the pipeline could read it. Confirmed with you
+#     this wasn't an intentional checkpoint; deleted.
+# =============================================================================
+
 # ── 1. Load packages ───────────────────────────────────────────────────────────
 library(tidyverse)
 library(data.table)
@@ -29,7 +55,7 @@ orbis_sh_long <- orbis_sh_raw %>%
                 `CSH - Direct %`, `CSH - Total %`,
                 sep = "\n")
 
-# ── 6. Construct state ownership variable ─────────────────────────────────────
+# ── 6. Construct state ownership variable [OLD / ROBUSTNESS ONLY] ─────────────
 state_types <- c("Public authority, state, government", "Public")
 
 state_ownership <- orbis_sh_long %>%
@@ -74,6 +100,9 @@ orbis_firm <- orbis_raw %>%
   mutate(
     guo_total_pct = suppressWarnings(as.numeric(na_if(guo_total_pct, "n.a."))),
     guo_state     = as.integer(guo_type %in% state_types),
+    # NOTE: foreign_owned is constructed here but excluded from main
+    # specifications per project decision -- kept available for robustness,
+    # not dead code, just unused downstream for now.
     foreign_owned = as.integer(!is.na(guo_country) & guo_country != country)
   )
 
@@ -124,19 +153,22 @@ df_panel <- df_clean %>%
 nrow(df_panel)
 n_distinct(df_panel$bvdId)
 
-# ── 11. Save ──────────────────────────────────────────────────────────────────
-saveRDS(df_panel, 'data/processed/df_panel_merged.rds')
+# (FIX: removed a saveRDS() call that was here -- it wrote to the same file
+# as the final save at the end of this script and was fully overwritten
+# before anything else could read it; confirmed not an intentional
+# checkpoint. df_panel continues in memory into Section 12 below.)
 
-# ── 12. Load and parse new shareholder export (Export_1 and Export_2) ─────────
+# ── 12. Load and parse new shareholder export (Export_1 and Export_2)
+#        [PRIMARY ownership construction] ────────────────────────────────────
 
-library(readxl)
-
-#reading in new export from orbis
-
+# reading in new export from orbis
 orbis_sh_1 <- read_excel('data/raw/Export_1.xlsx', sheet = 'Results')
 orbis_sh_2 <- read_excel('data/raw/Export_2.xlsx', sheet = 'Results')
 
-orbis_sh_1_clean <- read_excel('data/raw/Export_1.xlsx', sheet = 'Results') %>%
+# (FIX: orbis_sh_1_clean now builds off the already-loaded orbis_sh_1,
+# instead of re-reading Export_1.xlsx from disk a second time -- this
+# matches how orbis_sh_2_clean is built from orbis_sh_2 just below)
+orbis_sh_1_clean <- orbis_sh_1 %>%
   rename(bvdId = `...1`) %>%
   fill(bvdId, `Company name Latin alphabet`, .direction = 'down') %>%
   filter(!is.na(`SH - Name`))
@@ -160,11 +192,14 @@ orbis_sh_2_clean <- orbis_sh_2_clean %>%
 
 # get BvD IDs from original orbis_raw which has proper BvD IDs
 bvd_lookup <- orbis_raw %>%
-  select(bvdId = `BvD ID number`, 
+  select(bvdId = `BvD ID number`,
          `Company name Latin alphabet`) %>%
   filter(!is.na(bvdId))
 
 # merge BvD IDs into new shareholder data using company name
+# NOTE: this is a string match on company name -- worth a spot-check at
+# some point (e.g. anti_join against bvd_lookup) for how many rows fail
+# to match due to formatting differences between exports; not fixed here.
 orbis_sh_1_fixed <- orbis_sh_1_clean %>%
   select(-bvdId) %>%  # drop the wrong row number column
   left_join(bvd_lookup, by = 'Company name Latin alphabet')
@@ -174,12 +209,9 @@ orbis_sh_2_fixed <- orbis_sh_2_clean %>%
   left_join(bvd_lookup, by = 'Company name Latin alphabet')
 
 # stack both fixed exports
-orbis_sh_all <- bind_rows(
-  orbis_sh_1_fixed %>%
-    mutate(across(starts_with('SH - Direct %'), as.character)),
-  orbis_sh_2_fixed %>%
-    mutate(across(starts_with('SH - Direct %'), as.character))
-) %>%
+# (FIX: removed a redundant second as.character() cast on `SH - Direct %`
+# here -- it was already cast to character for both frames above)
+orbis_sh_all <- bind_rows(orbis_sh_1_fixed, orbis_sh_2_fixed) %>%
   filter(!is.na(bvdId))
 
 nrow(orbis_sh_all)
@@ -195,7 +227,7 @@ state_types <- c("Public authority, state, government", "Public")
 
 # pivot SH Direct % columns to long format
 sh_long <- orbis_sh_all %>%
-  select(bvdId, `Company name Latin alphabet`, 
+  select(bvdId, `Company name Latin alphabet`,
          `SH - Name`, `SH - Type`,
          starts_with('SH - Direct %')) %>%
   pivot_longer(
@@ -217,7 +249,7 @@ state_ownership_tv <- sh_long %>%
   group_by(bvdId, `Company name Latin alphabet`, year) %>%
   summarise(
     state_ownership_pct_tv = min(
-      sum(sh_direct_pct[is_state], na.rm = TRUE), 
+      sum(sh_direct_pct[is_state], na.rm = TRUE),
       100
     ),
     state_owned_binary_tv = as.integer(any(is_state & !is.na(sh_direct_pct))),
@@ -267,7 +299,7 @@ df_panel %>%
   )
 
 # distribution of new time-varying variable
-quantile(df_panel$state_ownership_pct_tv, 
+quantile(df_panel$state_ownership_pct_tv,
          probs = c(0, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99, 1),
          na.rm = TRUE)
 
