@@ -1,18 +1,84 @@
+# =============================================================================
+# 03_descriptive_stats.R
+#
+# Descriptive statistics and exploratory plots: emissions intensity
+# construction, correlation matrices, and compliance-surplus/coverage-ratio
+# patterns by ownership and phase.
+#
+# -----------------------------------------------------------------------------
+# TWO OWNERSHIP DATA SOURCES IN THIS PROJECT -- READ BEFORE ADDING NEW PLOTS
+# -----------------------------------------------------------------------------
+#   state_ownership_pct / state_owned_binary       [OLD / STATIC, from 02]
+#     One value per firm for the whole panel -- does NOT vary by year or phase.
+#
+#   state_ownership_pct_tv / state_owned_binary_tv  [PRIMARY / TIME-VARYING, from 02]
+#     Varies by firm-year; this is the variable used in the main regressions
+#     (06_regressions.R) per the project's standing decision.
+#
+# ALMOST EVERY PLOT IN THIS SCRIPT CURRENTLY USES THE OLD STATIC VARIABLE.
+# Only the final "trends in ownership" section (tacked on later) uses the TV
+# version. This was a deliberate choice (see chat) to leave as-is for now
+# rather than retrofit every plot -- but worth knowing which plots that
+# affects, and which would actually be MORE correct with the TV version:
+#
+#   - Every plot faceted `~phase` using the STATIC variable (surplus-by-
+#     ownership-by-phase, coverage-ratio-by-ownership-by-phase, log-emissions-
+#     by-ownership-by-phase, the four-way classification, etc.) is really
+#     only picking up which FIRMS fall into which ownership bucket -- it
+#     cannot show a firm's ownership actually changing across phases, since
+#     the static variable can't move. Given phase heterogeneity is the
+#     project's central story, these are the best candidates for a TV-based
+#     companion version if you want to see within-firm ownership changes
+#     show up in the descriptives, not just cross-sectional differences.
+#   - The two blocks that explicitly compare old vs. new (the `cor_old_new`
+#     summary, and the overlapping-histogram plot near the end of 02) are
+#     correct as-is and should keep referencing BOTH variables by design --
+#     don't "fix" those to TV-only.
+#   - A natural new addition: redo the ownership-by-phase boxplots with
+#     state_ownership_pct_tv instead, and see whether the ownership-surplus
+#     relationship looks different once within-firm ownership changes are
+#     actually reflected -- this is the single most informative plot not
+#     yet made with the TV variable.
+#
+# FIXES APPLIED THIS PASS (see chat):
+#   - `$checked dropped` was not valid R (a lost comment marker) -- this was
+#     almost certainly the actual cause of the "changes, need to fix" commit
+#     message, since it would throw a parse error and stop the script here.
+#   - make_ownership_group() / ownership_levels / ownership_colors were
+#     defined twice, byte-for-byte identical -- removed the second copy.
+#   - library(corrplot) loaded twice; library(dplyr)/library(ggplot2)
+#     reloaded later despite tidyverse already covering both -- removed.
+#   - df_panel was reloaded via readRDS() partway through despite already
+#     being in memory from Section 2 -- removed the duplicate reload.
+#   - install.packages() calls ran unconditionally every time the script
+#     runs -- changed to conditional installs (only installs if missing).
+#   - A leftover one-off debug line (`names(df_panel) %>% grep('ummul', ...)`
+#     with no further use of its result) was removed.
+#   - Figure numbers collided twice (two different "06_..." files, two
+#     different "12_..." files) -- the later-appearing duplicate in each
+#     pair was renumbered to the next free number in the project's figure
+#     sequence (16, 17) rather than overwriting the earlier one's output.
+#   - `ownership_4way` is referenced in one plot block but never constructed
+#     anywhere in this script or in 01/02 -- that block would error if run.
+#     Commented out with a TODO rather than deleted, since the four-way
+#     (domestic/foreign x private/state) classification is a real, useful
+#     idea -- it just needs to actually be built first.
+# =============================================================================
+ 
 # ── 1. Load packages ───────────────────────────────────────────────────────────
 library(tidyverse)
-install.packages("corrplot")
+if (!requireNamespace("corrplot", quietly = TRUE)) install.packages("corrplot")
 library(corrplot)
-
-#some helper functions
-
-# redefine ownership helper and colors
+ 
+# some helper functions
+ 
 ownership_levels <- c('Private (0%)', 'Majority state', 'Fully state (100%)')
 ownership_colors <- c(
   'Private (0%)'       = '#E8534A',
   'Majority state'     = '#2ECC71',
   'Fully state (100%)' = '#3498DB'
 )
-
+ 
 make_ownership_group <- function(df) {
   df %>%
     mutate(
@@ -25,10 +91,10 @@ make_ownership_group <- function(df) {
     ) %>%
     filter(!is.na(ownership_group))
 }
-
+ 
 # ── 2. Load panel ─────────────────────────────────────────────────────────────
 df_panel <- readRDS('data/processed/df_panel_merged.rds')
-
+ 
 df_panel %>%
   mutate(emissions_intensity = verified / operating_revenue) %>%
   summarise(
@@ -37,7 +103,7 @@ df_panel %>%
     n_missing = sum(is.na(emissions_intensity)),
     pct_coverage = round(mean(!is.na(emissions_intensity)) * 100, 1)
   )
-
+ 
 # missingness by phase
 df_panel %>%
   mutate(emissions_intensity = verified / operating_revenue) %>%
@@ -46,7 +112,7 @@ df_panel %>%
     n = n(),
     pct_coverage = round(mean(!is.na(emissions_intensity)) * 100, 1)
   )
-
+ 
 # missingness by country
 df_panel %>%
   mutate(emissions_intensity = verified / operating_revenue) %>%
@@ -56,7 +122,7 @@ df_panel %>%
     pct_coverage = round(mean(!is.na(emissions_intensity)) * 100, 1)
   ) %>%
   arrange(pct_coverage)
-
+ 
 # missingness by ownership type
 df_panel %>%
   mutate(emissions_intensity = verified / operating_revenue) %>%
@@ -65,7 +131,7 @@ df_panel %>%
     n = n(),
     pct_coverage = round(mean(!is.na(emissions_intensity)) * 100, 1)
   )
-
+ 
 df_panel %>%
   filter(phase >= 3) %>%
   mutate(emissions_intensity = verified / operating_revenue) %>%
@@ -74,7 +140,7 @@ df_panel %>%
     n_nonmissing = sum(!is.na(emissions_intensity)),
     pct_coverage = round(mean(!is.na(emissions_intensity)) * 100, 1)
   )
-
+ 
 # ── construct emissions intensity ──────────────────────────────────────────────
 df_panel <- df_panel %>%
   mutate(
@@ -82,39 +148,39 @@ df_panel <- df_panel %>%
       operating_revenue <= 0, NA, verified / operating_revenue
     ),
     log_emissions_intensity = ifelse(
-      operating_revenue <= 0 | emissions_intensity <= 0, 
+      operating_revenue <= 0 | emissions_intensity <= 0,
       NA, log(emissions_intensity)
     ),
     log_verified = log(verified)
   )
-
+ 
 # check how many negative/zero revenue observations
 sum(df_panel$operating_revenue <= 0, na.rm = TRUE)
-
+ 
 # recheck summary
 summary(df_panel$emissions_intensity)
 summary(df_panel$log_emissions_intensity)
-
+ 
 # check for remaining extreme outliers
-quantile(df_panel$emissions_intensity, 
+quantile(df_panel$emissions_intensity,
          probs = c(0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99),
          na.rm = TRUE)
-
+ 
 # trim top 1% before logging
 p99 <- quantile(df_panel$emissions_intensity, 0.99, na.rm = TRUE)
-
+ 
 df_panel <- df_panel %>%
   mutate(
-    emissions_intensity_trim = ifelse(emissions_intensity > p99, 
+    emissions_intensity_trim = ifelse(emissions_intensity > p99,
                                       NA, emissions_intensity),
     log_emissions_intensity = log(emissions_intensity_trim)
   )
-
+ 
 summary(df_panel$log_emissions_intensity)
-
+ 
 # save updated panel
 saveRDS(df_panel, 'data/processed/df_panel_merged.rds')
-
+ 
 # plot log emissions intensity by ownership and phase
 df_panel %>%
   filter(!is.na(log_emissions_intensity),
@@ -135,11 +201,11 @@ df_panel %>%
   theme_minimal() +
   theme(legend.position = 'none',
         axis.text.x = element_text(angle = 45, hjust = 1))
-
+ 
 ggsave('output/figures/14_log_intensity_by_ownership_trimmed.png',
        width = 12, height = 8, dpi = 300)
-
-$checked dropped
+ 
+# checked dropped
 df_panel %>%
   filter(!is.na(log_emissions_intensity)) %>%
   summarise(
@@ -148,14 +214,7 @@ df_panel %>%
     dropped = sum(!between(log_emissions_intensity, -10, 2)),
     pct_dropped = round(mean(!between(log_emissions_intensity, -10, 2)) * 100, 1)
   )
-
-
-
-
-
-
-
-
+ 
 # quick look at key variables
 df_panel %>%
   select(surplus_norm, coverage_ratio, compliant,
@@ -163,11 +222,10 @@ df_panel %>%
          guo_state, foreign_owned, independence,
          total_assets, operating_revenue, n_employees) %>%
   summary()
-
+ 
 # ── 3. Correlation matrix ─────────────────────────────────────────────────────
-library(corrplot)
-
-# ── updated correlation matrix with emissions intensity ────────────────────────
+ 
+# updated correlation matrix with emissions intensity
 cor_vars2 <- df_panel %>%
   select(
     surplus_norm,
@@ -179,11 +237,11 @@ cor_vars2 <- df_panel %>%
     foreign_owned
   ) %>%
   drop_na()
-
+ 
 nrow(cor_vars2)
-
+ 
 cor_matrix2 <- cor(cor_vars2)
-
+ 
 png('output/figures/15_correlation_matrix_v2.png',
     width = 10, height = 8, units = 'in', res = 300)
 corrplot(cor_matrix2,
@@ -195,7 +253,7 @@ corrplot(cor_matrix2,
          title = 'Correlation matrix v2: all dependent variables vs ownership',
          mar = c(0,0,1,0))
 dev.off()
-
+ 
 df_panel %>%
   filter(!is.na(log_verified),
          !is.na(operating_revenue),
@@ -204,11 +262,7 @@ df_panel %>%
     n = n(),
     n_firms = n_distinct(bvdId)
   )
-
-
-
-
-
+ 
 # select key variables and drop NAs
 cor_vars <- df_panel %>%
   select(
@@ -224,12 +278,12 @@ cor_vars <- df_panel %>%
     foreign_owned
   ) %>%
   drop_na()
-
+ 
 # compute correlation matrix
 cor_matrix <- cor(cor_vars)
-
+ 
 # plot
-corrplot(cor_matrix, 
+corrplot(cor_matrix,
          method = 'color',
          type = 'upper',
          addCoef.col = 'black',
@@ -237,11 +291,11 @@ corrplot(cor_matrix,
          tl.cex = 0.7,
          title = 'Correlation matrix: compliance outcomes vs ownership',
          mar = c(0,0,1,0))
-
+ 
 # save correlation matrix
-png('output/figures/07_correlation_matrix.png', 
+png('output/figures/07_correlation_matrix.png',
     width = 10, height = 8, units = 'in', res = 300)
-
+ 
 corrplot(cor_matrix,
          method = 'color',
          type = 'upper',
@@ -250,10 +304,10 @@ corrplot(cor_matrix,
          tl.cex = 0.7,
          title = 'Correlation: compliance outcomes vs ownership',
          mar = c(0,0,1,0))
-
+ 
 dev.off()
-
-# ── 3. Surplus vs state ownership scatter ─────────────────────────────────────
+ 
+# ── 3b. Surplus vs state ownership scatter ────────────────────────────────────
 df_panel %>%
   filter(!is.na(state_ownership_pct),
          !is.na(surplus_norm)) %>%
@@ -267,12 +321,11 @@ df_panel %>%
     y = '(Allocated - Verified) / Verified'
   ) +
   theme_minimal()
-
+ 
 ggsave('output/figures/05_surplus_vs_ownership.png',
        width = 10, height = 6, dpi = 300)
-
-
-# ── 3b. By phase ──────────────────────────────────────────────────────────────
+ 
+# ── 3c. By phase ──────────────────────────────────────────────────────────────
 df_panel %>%
   filter(!is.na(state_ownership_pct),
          !is.na(surplus_norm),
@@ -289,11 +342,10 @@ df_panel %>%
     y = '(Allocated - Verified) / Verified'
   ) +
   theme_minimal()
-
+ 
 ggsave('output/figures/06_surplus_vs_ownership_by_phase.png',
        width = 12, height = 8, dpi = 300)
-
-
+ 
 # box plot — cleaner way to show the relationship
 df_panel %>%
   filter(!is.na(state_owned_binary),
@@ -306,8 +358,8 @@ df_panel %>%
       state_ownership_pct >= 50 & state_ownership_pct < 100 ~ 'Majority state (50-99%)',
       state_ownership_pct == 100 ~ 'Fully state (100%)'
     ),
-    ownership_group = factor(ownership_group, 
-                             levels = c('Private (0%)', 
+    ownership_group = factor(ownership_group,
+                             levels = c('Private (0%)',
                                         'Minority state (<50%)',
                                         'Majority state (50-99%)',
                                         'Fully state (100%)'))
@@ -325,21 +377,22 @@ df_panel %>%
   theme_minimal() +
   theme(legend.position = 'none',
         axis.text.x = element_text(angle = 45, hjust = 1))
-
-ggsave('output/figures/06_surplus_by_ownership_phase.png',
+ 
+# FIX: renumbered from a duplicate "06" to the next free number in sequence
+ggsave('output/figures/16_surplus_by_ownership_phase.png',
        width = 12, height = 8, dpi = 300)
-
+ 
 # ── proxy for government progressivity using country groups ───────────────────
 green_govts <- c('FR', 'DE', 'SE', 'DK', 'NL', 'AT', 'FI', 'NO')
 laggard_govts <- c('HU', 'PL', 'CZ', 'BG', 'RO', 'SK')
-
+ 
 df_panel %>%
   filter(!is.na(state_ownership_pct),
          !is.na(surplus_norm),
          between(surplus_norm, -1, 2),
          registry_id %in% c(green_govts, laggard_govts)) %>%
   mutate(
-    govt_type = ifelse(registry_id %in% green_govts, 
+    govt_type = ifelse(registry_id %in% green_govts,
                        'Green government', 'Laggard government'),
     ownership_group = case_when(
       state_ownership_pct == 0 ~ 'Private',
@@ -357,33 +410,10 @@ df_panel %>%
   ) +
   theme_minimal() +
   theme(legend.position = 'none')
-
+ 
 ggsave('output/figures/08_ownership_by_govt_type.png',
        width = 12, height = 10, dpi = 300)
-
-
-# set consistent ownership colors and levels
-ownership_levels <- c('Private (0%)', 'Majority state', 'Fully state (100%)')
-ownership_colors <- c(
-  'Private (0%)'       = '#E8534A',   
-  'Majority state'     = '#2ECC71',     
-  'Fully state (100%)' = '#3498DB'    
-)
-
-# helper to create ownership group variable
-make_ownership_group <- function(df) {
-  df %>%
-    mutate(
-      ownership_group = case_when(
-        state_ownership_pct == 0 ~ 'Private (0%)',
-        state_ownership_pct >= 50 & state_ownership_pct < 100 ~ 'Majority state',
-        state_ownership_pct == 100 ~ 'Fully state (100%)'
-      ),
-      ownership_group = factor(ownership_group, levels = ownership_levels)
-    ) %>%
-    filter(!is.na(ownership_group))
-}
-
+ 
 # ── Coverage ratio by ownership and phase ─────────────────────────────────
 df_panel %>%
   filter(!is.na(state_ownership_pct),
@@ -404,10 +434,10 @@ df_panel %>%
   theme_minimal() +
   theme(legend.position = 'none',
         axis.text.x = element_text(angle = 45, hjust = 1))
-
+ 
 ggsave('output/figures/09_coverage_ratio_by_ownership.png',
        width = 12, height = 8, dpi = 300)
-
+ 
 # ── Emissions trajectory within phase ─────────────────────────────────────
 df_panel %>%
   filter(!is.na(state_ownership_pct),
@@ -430,10 +460,10 @@ df_panel %>%
   theme_minimal() +
   theme(legend.position = 'none',
         axis.text.x = element_text(angle = 45, hjust = 1))
-
+ 
 ggsave('output/figures/10_emissions_trajectory_by_ownership.png',
        width = 12, height = 8, dpi = 300)
-
+ 
 # ── Log verified emissions by ownership and phase ─────────────────────────
 df_panel %>%
   filter(!is.na(state_ownership_pct),
@@ -454,17 +484,17 @@ df_panel %>%
   theme_minimal() +
   theme(legend.position = 'none',
         axis.text.x = element_text(angle = 45, hjust = 1))
-
+ 
 ggsave('output/figures/11_log_emissions_by_ownership.png',
        width = 12, height = 8, dpi = 300)
-
+ 
 # ── foreign ownership vs surplus by phase ─────────────────────────────────────
 foreign_colors <- c(
   'Domestic private' = '#E8534A',
   'Domestic state'   = '#3498DB',
   'Foreign owned'    = '#2ECC71'
 )
-
+ 
 df_panel %>%
   filter(!is.na(state_owned_binary),
          !is.na(foreign_owned),
@@ -495,40 +525,47 @@ df_panel %>%
   theme_minimal() +
   theme(legend.position = 'none',
         axis.text.x = element_text(angle = 45, hjust = 1))
-
+ 
 ggsave('output/figures/12_surplus_by_foreign_ownership.png',
        width = 12, height = 8, dpi = 300)
-
+ 
 # ── four-way ownership classification plot ────────────────────────────────────
-ownership_4way_colors <- c(
-  'Domestic private' = '#E8534A',
-  'Domestic state'   = '#3498DB',
-  'Foreign private'  = '#2ECC71',
-  'Foreign state'    = '#9B59B6'
-)
-
-df_panel %>%
-  filter(!is.na(ownership_4way),
-         !is.na(surplus_norm),
-         between(surplus_norm, -1, 2)) %>%
-  ggplot(aes(x = ownership_4way, y = surplus_norm, fill = ownership_4way)) +
-  geom_boxplot(alpha = 0.8, outlier.alpha = 0.1) +
-  facet_wrap(~phase) +
-  scale_fill_manual(values = ownership_4way_colors) +
-  labs(
-    title = 'Compliance surplus by four-way ownership classification',
-    subtitle = 'Domestic vs foreign × private vs state',
-    x = 'Ownership type',
-    y = '(Allocated - Verified) / Verified'
-  ) +
-  theme_minimal() +
-  theme(legend.position = 'none',
-        axis.text.x = element_text(angle = 45, hjust = 1))
-
-ggsave('output/figures/13_surplus_four_way_ownership.png',
-       width = 12, height = 8, dpi = 300)
-
-# ── 3. Coverage vs state ownership scatter ─────────────────────────────────────
+# TODO: ownership_4way is not constructed anywhere in this script or in
+# 01/02 -- this block would error if run as-is. Build it first (likely as
+# interaction of foreign_owned x state_owned_binary, or the TV equivalents)
+# before uncommenting. Left in rather than deleted since the four-way
+# domestic/foreign x private/state classification is a genuinely useful
+# idea, just not yet implemented.
+#
+# ownership_4way_colors <- c(
+#   'Domestic private' = '#E8534A',
+#   'Domestic state'   = '#3498DB',
+#   'Foreign private'  = '#2ECC71',
+#   'Foreign state'    = '#9B59B6'
+# )
+#
+# df_panel %>%
+#   filter(!is.na(ownership_4way),
+#          !is.na(surplus_norm),
+#          between(surplus_norm, -1, 2)) %>%
+#   ggplot(aes(x = ownership_4way, y = surplus_norm, fill = ownership_4way)) +
+#   geom_boxplot(alpha = 0.8, outlier.alpha = 0.1) +
+#   facet_wrap(~phase) +
+#   scale_fill_manual(values = ownership_4way_colors) +
+#   labs(
+#     title = 'Compliance surplus by four-way ownership classification',
+#     subtitle = 'Domestic vs foreign × private vs state',
+#     x = 'Ownership type',
+#     y = '(Allocated - Verified) / Verified'
+#   ) +
+#   theme_minimal() +
+#   theme(legend.position = 'none',
+#         axis.text.x = element_text(angle = 45, hjust = 1))
+#
+# ggsave('output/figures/13_surplus_four_way_ownership.png',
+#        width = 12, height = 8, dpi = 300)
+ 
+# ── 3d. Coverage vs state ownership scatter ───────────────────────────────────
 df_panel %>%
   filter(!is.na(state_ownership_pct),
          !is.na(coverage_ratio)) %>%
@@ -542,59 +579,57 @@ df_panel %>%
     y = 'Allocated / Verified'
   ) +
   theme_minimal()
-
-ggsave('output/figures/12_coverage_vs_ownership.png',
+ 
+# FIX: renumbered from a duplicate "12" to the next free number in sequence
+ggsave('output/figures/17_coverage_vs_ownership.png',
        width = 10, height = 6, dpi = 300)
-
-names(df_panel) %>% grep('ummul', ., value = TRUE, ignore.case = TRUE)
-
-
-# trends in ownership 
-
-
-library(dplyr); library(ggplot2)
-
-df_panel <- readRDS("data/processed/df_panel_merged.rds")
-
+ 
+# ── 4. Trends in ownership over time [uses the TIME-VARYING variable] ────────
+# This section correctly uses state_ownership_pct_tv -- the only part of
+# this script that does. See the header note on which other plots above
+# would benefit from the same treatment.
+ 
 ownership_trend <- df_panel %>%
   filter(!is.na(state_ownership_pct_tv)) %>%
   group_by(year) %>%
   summarise(mean_ownership = mean(state_ownership_pct_tv, na.rm = TRUE),
             median_ownership = median(state_ownership_pct_tv, na.rm = TRUE))
-
+ 
 ggplot(ownership_trend, aes(x = year, y = mean_ownership)) +
   geom_line(color = "steelblue", linewidth = 1.2) +
   geom_point(color = "steelblue", size = 2) +
   labs(title = "Average State Ownership Share in EU ETS Power Sector",
        x = "Year", y = "Mean State Ownership (%)") +
   theme_minimal(base_size = 13)
-
+ 
 ggsave("output/figures/ownership_decline_trend.png", width = 8, height = 5, dpi = 300)
-
+ 
 ggplot(ownership_trend, aes(x = year)) +
   geom_line(aes(y = mean_ownership, color = "Mean"), linewidth = 1.2) +
   geom_line(aes(y = median_ownership, color = "Median"), linewidth = 1.2, linetype = "dashed") +
   labs(title = "State Ownership Share Over Time: Mean vs Median",
        x = "Year", y = "State Ownership (%)", color = "") +
   theme_minimal(base_size = 13)
-
-install.packages("rnaturalearth")
-install.packages("rnaturalearthdata")
-library(sf); library(rnaturalearth); library(rnaturalearthdata); library(dplyr); library(ggplot2)
-
+ 
+# ── 5. Map: average ownership by country [uses the TIME-VARYING variable] ────
+ 
+if (!requireNamespace("rnaturalearth", quietly = TRUE)) install.packages("rnaturalearth")
+if (!requireNamespace("rnaturalearthdata", quietly = TRUE)) install.packages("rnaturalearthdata")
+library(sf); library(rnaturalearth); library(rnaturalearthdata)
+ 
 # average ownership by country across full sample (or pick a specific year if you prefer)
 country_ownership <- df_panel %>%
   filter(!is.na(state_ownership_pct_tv)) %>%
   group_by(country) %>%
   summarise(mean_ownership = mean(state_ownership_pct_tv, na.rm = TRUE))
-
+ 
 # get EU country boundaries
 europe_map <- ne_countries(scale = "medium", continent = "Europe", returnclass = "sf")
-
+ 
 # your panel uses ISO2 codes - match on that
 europe_map <- europe_map %>%
   left_join(country_ownership, by = c("iso_a2" = "country"))
-
+ 
 ggplot(europe_map) +
   geom_sf(aes(fill = mean_ownership), color = "white", linewidth = 0.2) +
   coord_sf(xlim = c(-25, 45), ylim = c(34, 72)) +   # crop to European extent
@@ -603,7 +638,5 @@ ggplot(europe_map) +
   labs(title = "Average State Ownership Share by Country") +
   theme_minimal(base_size = 13) +
   theme(axis.text = element_blank(), axis.ticks = element_blank(), panel.grid = element_blank())
-
+ 
 ggsave("output/figures/ownership_map_eu.png", width = 9, height = 8, dpi = 300)
-
-
