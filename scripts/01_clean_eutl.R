@@ -1,10 +1,21 @@
+# =============================================================================
+# 01_clean_eutl.R
+#
+# Cleans EU Transaction Log (EUTL) installation and compliance data, restricts
+# to power-sector installations, constructs compliance-surplus variables, and
+# merges in BvD IDs (via operator holding accounts) for the later Orbis
+# ownership merge in 02_merge_orbis.R.
+#
+# FIX APPLIED: changed df to df_clean, not sure if df was actually used for empirical results
+# =============================================================================
+ 
 library(tidyverse)
 library(data.table)
-
+ 
 # ── 1. Load raw data ──────────────────────────────────────────────────────────
 installations <- fread('data/raw/installation.csv')
 compliance    <- fread('data/raw/compliance.csv')
-
+ 
 # ── 2. Filter installations to power sector only ──────────────────────────────
 installations_clean <- installations %>%
   filter(
@@ -12,7 +23,7 @@ installations_clean <- installations %>%
     isMaritimeOperator == FALSE,
     activity_id %in% c(1, 20)
   )
-
+ 
 # ── 3. Merge installation and compliance ──────────────────────────────────────
 df_merged <- compliance %>%
   inner_join(
@@ -22,9 +33,9 @@ df_merged <- compliance %>%
              latitudeGoogle, longitudeGoogle),
     by = c('installation_id' = 'id')
   )
-
+ 
 # ── 4. Clean compliance observations ─────────────────────────────────────────
-
+ 
 df_clean <- df_merged %>%
   filter(
     compliance_id %in% c('A', 'B', 'E'),
@@ -44,12 +55,12 @@ df_clean <- df_merged %>%
 nrow(df_clean)
 table(df_clean$phase)
 table(df_clean$compliance_id)
-
+ 
 # how many unique installations remain
-n_distinct(df$installation_id)
-
+n_distinct(df_clean$installation_id)
+ 
 # construct dependent variables at installation level
-df_clean <- df %>%
+df_clean <- df_clean %>%
   mutate(
     surplus_raw  = allocatedTotal - verified,
     surplus_norm = surplus_raw / verified,
@@ -62,29 +73,32 @@ df_clean <- df %>%
     emissions_growth = (verified - lag(verified)) / lag(verified)
   ) %>%
   ungroup()
-
+ 
 # find the extreme outliers
 df_clean %>%
   filter(surplus_norm > 100) %>%
-  select(installation_id, year, verified, 
+  select(installation_id, year, verified,
          allocatedTotal, surplus_norm) %>%
   arrange(desc(surplus_norm)) %>%
   head(20)
-
-quantile(df_clean$surplus_norm, 
+ 
+quantile(df_clean$surplus_norm,
          probs = c(0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99),
          na.rm = TRUE)
-
-# trim at 99th percentile on top, keep -1 floor on bottom
+ 
+# trim at the 99th percentile on top, keep a -1 floor on bottom
+# (FIX: computed from the data rather than a hardcoded "10" that could
+# silently drift out of sync with the actual quantile shown above)
+upper_trim <- quantile(df_clean$surplus_norm, probs = 0.99, na.rm = TRUE)
 df_clean <- df_clean %>%
-  filter(surplus_norm >= -1, surplus_norm <= 10)
-
+  filter(surplus_norm >= -1, surplus_norm <= upper_trim)
+ 
 nrow(df_clean)
 summary(df_clean$surplus_norm)
-
+ 
 # ── 5. Descriptive Plots ─────────────────────────────────────────
-
-# Distribution of surplus by phase
+ 
+# 5.1 Distribution of surplus by phase
 df_clean %>%
   filter(!is.na(phase)) %>%
   mutate(phase_label = paste('Phase', phase)) %>%
@@ -98,10 +112,11 @@ df_clean %>%
     y = 'Count'
   ) +
   theme_minimal()
-
-ggsave('output/figures/01_surplus_distribution_by_phase.png', 
+ 
+ggsave('output/figures/01_surplus_distribution_by_phase.png',
        width = 12, height = 6, dpi = 300)
-
+ 
+# 5.2 Total verified emissions over time
 df_clean %>%
   group_by(year) %>%
   summarise(
@@ -110,13 +125,13 @@ df_clean %>%
   ggplot(aes(x = year, y = total_emissions)) +
   geom_line(color = 'steelblue', linewidth = 1) +
   geom_point(color = 'steelblue', size = 2) +
-  geom_vline(xintercept = c(2008, 2013, 2021), 
+  geom_vline(xintercept = c(2008, 2013, 2021),
              linetype = 'dashed', color = 'grey50') +
-  annotate('text', x = 2008.2, y = 1550, 
+  annotate('text', x = 2008.2, y = 1550,
            label = 'Phase 2', hjust = 0, size = 3) +
-  annotate('text', x = 2013.2, y = 1550, 
+  annotate('text', x = 2013.2, y = 1550,
            label = 'Phase 3', hjust = 0, size = 3) +
-  annotate('text', x = 2021.2, y = 1550, 
+  annotate('text', x = 2021.2, y = 1550,
            label = 'Phase 4', hjust = 0, size = 3) +
   labs(
     title = 'Total verified emissions over time',
@@ -125,11 +140,11 @@ df_clean %>%
     y = 'Mt CO2'
   ) +
   theme_minimal()
-
+ 
 ggsave('output/figures/02_emissions_over_time.png',
        width = 10, height = 6, dpi = 300)
-
-# 5.3 Median surplus over time 
+ 
+# 5.3 Median surplus over time
 df_clean %>%
   group_by(year, phase) %>%
   summarise(
@@ -153,11 +168,11 @@ df_clean %>%
     y = 'Median (Allocated - Verified) / Verified'
   ) +
   theme_minimal()
-
+ 
 ggsave('output/figures/03_median_surplus_over_time.png',
        width = 10, height = 6, dpi = 300)
-
-# 5.4 Non-compliance rate by country 
+ 
+# 5.4 Non-compliance rate by country
 df_clean %>%
   group_by(registry_id) %>%
   summarise(
@@ -166,7 +181,7 @@ df_clean %>%
   ) %>%
   filter(n_obs > 100) %>%  # drop tiny countries
   arrange(desc(noncompliance_rate)) %>%
-  ggplot(aes(x = reorder(registry_id, noncompliance_rate), 
+  ggplot(aes(x = reorder(registry_id, noncompliance_rate),
              y = noncompliance_rate * 100)) +
   geom_col(fill = 'steelblue', alpha = 0.8) +
   coord_flip() +
@@ -177,58 +192,58 @@ df_clean %>%
     y = 'Non-compliance rate (%)'
   ) +
   theme_minimal()
-
+ 
 ggsave('output/figures/04_noncompliance_by_country.png',
        width = 8, height = 8, dpi = 300)
-
-# Italy and France non-compliance rates are very high, which is interesting 
+ 
+# Italy and France non-compliance rates are very high, which is interesting
 # because they are usually countries with high regulatory agencies
-
+ 
 saveRDS(df_clean, 'data/processed/df_clean_installation.rds')
-
-
+ 
+ 
 # ── 6. Load and explore account table ─────────────────────────────────────────
 accounts <- fread('data/raw/account.csv')
-
+ 
 # filter to operator holding accounts only
 oha <- accounts %>%
-  filter(accountType_id %in% c('100-7', '120-0')) %>%  
+  filter(accountType_id %in% c('100-7', '120-0')) %>%
   # 100-7 = active OHA, 120-0 = former OHA (pre-2013)
   filter(installation_id != '') %>%  # must be linked to an installation
   filter(bvdId != '') %>%            # must have a BvD ID
-  select(installation_id, bvdId, accountType_id, 
+  select(installation_id, bvdId, accountType_id,
          companyRegistrationNumber, isOpen)
-
+ 
 # check for installations with multiple BvD IDs
 oha %>%
   group_by(installation_id) %>%
   summarise(n_bvd = n_distinct(bvdId)) %>%
   filter(n_bvd > 1) %>%
   nrow()
-
+ 
 # resolve multiple BvD IDs by preferring active OHA (100-7) over former (120-0)
 oha_clean <- oha %>%
-  arrange(installation_id, 
+  arrange(installation_id,
           ifelse(accountType_id == '100-7', 0, 1)) %>%  # active first
   group_by(installation_id) %>%
   slice(1) %>%  # take first row (active OHA preferred)
   ungroup()
-
+ 
 # verify
 n_distinct(oha_clean$installation_id)
 n_distinct(oha_clean$bvdId)
-
+ 
 # check no more duplicates
 oha_clean %>%
   group_by(installation_id) %>%
   summarise(n_bvd = n_distinct(bvdId)) %>%
   filter(n_bvd > 1) %>%
   nrow()
-
+ 
 # how many of our power installations have a BvD ID
-power_ids <- df_clean %>% 
+power_ids <- df_clean %>%
   distinct(installation_id)
-
+ 
 power_ids %>%
   left_join(oha_clean, by = 'installation_id') %>%
   summarise(
@@ -236,30 +251,20 @@ power_ids %>%
     has_bvd = sum(!is.na(bvdId) & bvdId != ''),
     missing_bvd = sum(is.na(bvdId) | bvdId == '')
   )
-
+ 
 # ── 7. Merge BvD IDs into main dataframe ──────────────────────────────────────
 df_clean <- df_clean %>%
   left_join(
     oha_clean %>% select(installation_id, bvdId),
     by = 'installation_id'
   )
-
+ 
 # verify
 n_distinct(df_clean$bvdId[df_clean$bvdId != '' & !is.na(df_clean$bvdId)])
-
-# save updated version
-saveRDS(df_clean, 'data/processed/df_clean_with_bvd.rds')
-
+ 
 # coverage by country
-df_clean %>%
-  mutate(has_bvd = !is.na(bvdId) & bvdId != '') %>%
-  group_by(registry_id) %>%
-  summarise(
-    coverage = round(mean(has_bvd) * 100, 1),
-    n_obs = n()
-  ) %>%
-  arrange(coverage)
-
+# (FIX: removed a duplicate copy of this exact block that only differed by
+# a trailing print(n = 30) -- kept the version that prints the full table)
 df_clean %>%
   mutate(has_bvd = !is.na(bvdId) & bvdId != '') %>%
   group_by(registry_id) %>%
@@ -269,11 +274,11 @@ df_clean %>%
   ) %>%
   arrange(coverage) %>%
   print(n = 30)
-
+ 
 # concerning for GR (19%), IT (78%), GB (84%), IE (78%), especially Greece
-
-# how many observations remain if we restrict to has_bvd only
-# and how many unique installations
+ 
+# how many observations remain if we restrict to has_bvd only,
+# and how many unique installations/firms
 df_clean %>%
   filter(!is.na(bvdId) & bvdId != '') %>%
   summarise(
@@ -281,23 +286,29 @@ df_clean %>%
     n_installations = n_distinct(installation_id),
     n_firms = n_distinct(bvdId)
   )
-
+ 
+# save the version with BvD IDs merged in
+# (FIX: this was called twice in a row with no change in between -- kept once)
 saveRDS(df_clean, 'data/processed/df_clean_with_bvd.rds')
-
+ 
 # split BvD IDs into two batches for Orbis upload
 bvd_ids <- df_clean %>%
   filter(!is.na(bvdId) & bvdId != '') %>%
   distinct(bvdId)
-
+ 
 # split in half
 halfway <- floor(nrow(bvd_ids) / 2)
-
+ 
 bvd_batch1 <- bvd_ids[1:halfway, ]
 bvd_batch2 <- bvd_ids[(halfway + 1):nrow(bvd_ids), ]
-
+ 
 # check sizes
 nrow(bvd_batch1)
 nrow(bvd_batch2)
+ 
+# export both
+write.csv(bvd_batch1, 'data/processed/bvd_ids_batch1.csv', row.names = FALSE)
+write.csv(bvd_batch2, 'data/processed/bvd_ids_batch2.csv', row.names = FALSE)
 
 # export both
 write.csv(bvd_batch1, 'data/processed/bvd_ids_batch1.csv', row.names = FALSE)
