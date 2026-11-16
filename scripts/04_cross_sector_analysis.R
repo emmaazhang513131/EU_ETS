@@ -1,16 +1,43 @@
+# =============================================================================
+# 04_cross_sector_analysis.R
+#
+# Builds an all-sectors (not just power) EUTL compliance dataset, merges in
+# ownership/financials, and compares correlation structure across sectors.
+#
+# NOTE: this script produces df_all and sectors_to_plot, which 05 and 06 both
+# depend on existing in-session -- neither currently reloads them from disk.
+# See chat for the broader session-dependency issue across 04/05/06/07.
+#
+# FIXES APPLIED (see chat):
+#   - `df_panel` was referenced in three places (ownership distribution
+#     checks, ownership-change count) but never defined anywhere in this
+#     script -- same bug class as 01's df/df_clean issue. Fixed to
+#     `df_panel_full`, which IS defined here (loaded in Section 6) and
+#     contains the needed columns.
+#   - The sector-classification case_when() was written twice, identically
+#     -- once as a throwaway count check, once as the real assignment into
+#     df_all. Consolidated to assign once, then reuse df_all$sector for
+#     the check.
+#   - A leftover debug snippet at the very end (re-loading orbis_raw just
+#     to grep column names, no persisted use of the result) was removed.
+# =============================================================================
+
 # ── 1. Load packages ───────────────────────────────────────────────────────────
 library(tidyverse)
 library(data.table)
 library(corrplot)
 
-# ── 2. Load raw EUTL data (all sectors) ───────────────────────────────────────
-
-# ── all sectors dataset ───────────────────────────────────────────────────────
+# ── 2. Load raw EUTL data (all sectors) + build all-sectors compliance dataset ─
 installations_all <- fread('data/raw/installation.csv') %>%
   filter(
     isAircraftOperator == FALSE,
     isMaritimeOperator == FALSE
   )
+
+# FIX (see chat): saved so 07_merge_fuel_type.R can load this instead of
+# depending on 04 having run in the same session, or (worse) silently
+# re-deriving it with different filter logic than this script uses.
+saveRDS(installations_all, 'data/processed/installations_all.rds')
 
 compliance_raw <- fread('data/raw/compliance.csv')
 
@@ -39,14 +66,9 @@ df_all <- compliance_raw %>%
   filter(
     phase > 1,
     between(surplus_norm, -1, 10)
-  )
-
-# check
-nrow(df_all)
-table(df_all$phase)
-
-# sector breakdown
-df_all %>%
+  ) %>%
+  # FIX: sector classification assigned once here, rather than being
+  # duplicated later as a separate throwaway case_when()
   mutate(sector = case_when(
     activity_id %in% c(1, 20) ~ 'Power',
     activity_id %in% c(6, 29) ~ 'Cement',
@@ -54,14 +76,22 @@ df_all %>%
     activity_id %in% c(2, 21) ~ 'Refining',
     activity_id %in% c(9, 35, 36) ~ 'Pulp/Paper',
     TRUE ~ 'Other'
-  )) %>%
+  ))
+
+# check
+nrow(df_all)
+table(df_all$phase)
+
+# sector breakdown
+df_all %>%
   count(sector) %>%
   arrange(desc(n))
 
-# ── 3. Build all-sectors compliance dataset ───────────────────────────────────
-
 # ── 4. Merge BvD IDs ──────────────────────────────────────────────────────────
 # load the oha_clean object - need to rebuild it from account table
+# (NOTE: this duplicates the identical OHA-resolution logic from 01 -- worth
+# considering saving oha_clean as its own .rds in 01 and loading it here
+# instead, so the dedup rule only has to live in one place)
 accounts <- fread('data/raw/account.csv')
 
 oha_clean <- accounts %>%
@@ -83,23 +113,11 @@ df_all <- df_all %>%
 # ── 5. Merge Orbis ownership ──────────────────────────────────────────────────
 # load orbis_merged from processed data
 orbis_merged <- readRDS('data/processed/df_panel_merged.rds') %>%
-  distinct(bvdId, state_ownership_pct, state_owned_binary, 
+  distinct(bvdId, state_ownership_pct, state_owned_binary,
            guo_state, foreign_owned, guo_type, guo_country)
 
 df_all <- df_all %>%
   left_join(orbis_merged, by = 'bvdId')
-
-
-df_all <- df_all %>%
-  mutate(sector = case_when(
-    activity_id %in% c(1, 20) ~ 'Power',
-    activity_id %in% c(6, 29) ~ 'Cement',
-    activity_id %in% c(5, 24, 25) ~ 'Steel/Metal',
-    activity_id %in% c(2, 21) ~ 'Refining',
-    activity_id %in% c(9, 35, 36) ~ 'Pulp/Paper',
-    TRUE ~ 'Other'
-  ))
-
 
 # check coverage by sector
 df_all %>%
@@ -151,8 +169,7 @@ df_all %>%
     pct_revenue = round(mean(has_revenue) * 100, 1)
   )
 
-
-# Testing other variables for deminominator to see if they have better coverage  
+# Testing other variables for denominator to see if they have better coverage
 
 df_all %>%
   filter(phase >= 3) %>%
@@ -170,7 +187,8 @@ df_all %>%
   )
 
 # ownership distribution — full power sector panel
-df_panel %>%
+# (FIX: was `df_panel`, undefined in this script -- now df_panel_full)
+df_panel_full %>%
   summarise(
     n = n(),
     mean_state_pct = round(mean(state_ownership_pct, na.rm = TRUE), 1),
@@ -179,7 +197,7 @@ df_panel %>%
   )
 
 # ownership distribution — revenue subsample only
-df_panel %>%
+df_panel_full %>%
   filter(!is.na(operating_revenue), operating_revenue > 0) %>%
   summarise(
     n = n(),
@@ -213,7 +231,7 @@ corrplot(cor_matrix_all,
 dev.off()
 
 # ── 8. Separated by sector ────────────────────────────────────────────────────
-sectors_to_plot <- c('Power', 'Refining', 'Steel/Metal', 
+sectors_to_plot <- c('Power', 'Refining', 'Steel/Metal',
                      'Pulp/Paper', 'Cement')
 
 png('output/figures/17_correlation_matrix_by_sector.png',
@@ -221,16 +239,16 @@ png('output/figures/17_correlation_matrix_by_sector.png',
 par(mfrow = c(2, 3))
 
 for (s in sectors_to_plot) {
-  
+
   cor_data <- df_all %>%
     filter(sector == s) %>%
     select(surplus_norm, log_verified,
            state_ownership_pct, state_owned_binary,
            guo_state, foreign_owned) %>%
     drop_na()
-  
+
   n_obs <- nrow(cor_data)
-  
+
   if (n_obs > 50) {
     cor_mat <- cor(cor_data)
     corrplot(cor_mat,
@@ -245,7 +263,6 @@ for (s in sectors_to_plot) {
 }
 
 dev.off()
-
 
 df_all %>%
   filter(phase >= 3) %>%
@@ -263,9 +280,9 @@ df_all %>%
   ) %>%
   arrange(desc(pct_revenue))
 
-
 # how many firms show ownership changes in your Orbis data
-df_panel %>%
+# (FIX: was `df_panel`, undefined in this script -- now df_panel_full)
+df_panel_full %>%
   filter(!is.na(state_owned_binary)) %>%
   arrange(bvdId, year) %>%
   group_by(bvdId) %>%
@@ -274,11 +291,7 @@ df_panel %>%
   summarise(n_changes = n()) %>%
   nrow()
 
-library(readxl)
-orbis_raw <- bind_rows(
-  read_excel('data/raw/orbis_batch1.xlsx', sheet = 'Results'),
-  read_excel('data/raw/orbis_batch2.xlsx', sheet = 'Results')
-) %>%
-  filter(!is.na(`BvD ID number`))
-
-names(orbis_raw) %>% grep('Direct', ., value = TRUE)
+# FIX (see chat): saved so 05_merge_policy_indices.R and 06_regressions.R
+# can both load df_all independently, instead of depending on 04 having
+# run in the same unbroken session immediately before.
+saveRDS(df_all, 'data/processed/df_all_sectors.rds')
