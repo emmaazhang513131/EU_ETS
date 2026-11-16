@@ -1,4 +1,10 @@
 # 09_nec_emissions_merge.R
+#
+# FIX APPLIED (see chat): nec_clean is used directly by 06_regressions.R
+# (for its SO2 trend/ambition-gap construction) but was never saved here --
+# 06 could only find it by having 09 run in the same session immediately
+# before. Saved right after construction, below, so 06 can load it
+# independently.
 # Builds annual NOx/SOx/PM emissions series from EEA's National Emission 
 # Ceilings (NEC) Directive inventory data, as a proxy for the "non-market 
 # based policies" component of EPS (ELV NOx/SOx/PM), to test whether 
@@ -24,6 +30,8 @@ nec_clean <- nec_raw %>%
   group_by(countryCode, year, pollutantName) %>%
   summarise(value = sum(value, na.rm = TRUE), .groups = "drop") %>%
   select(country = countryCode, year, pollutantName, value)
+
+saveRDS(nec_clean, 'data/processed/nec_clean.rds')
 
 # ---- 4. pivot to one column per pollutant ----
 nec_wide <- nec_clean %>%
