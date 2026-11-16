@@ -6,18 +6,7 @@
 #
 # FIXES APPLIED (see chat):
 #   - The fabricated GBR ("General Binding Rules") variable has been removed
-#     entirely -- it was never a real, verifiable policy (Article 17 of
-#     Directive 2010/75/EU is a generic permitting option, not a named
-#     discrete policy with the country list this script invented:
-#     AT/BE/DE/DK/FR/NL/SE). This removed ~190 lines: the GBR-strictness
-#     regressions, the GBR x institutional-quality triple interactions, the
-#     "self_eps" index (an average of price and the fabricated GBR variable
-#     -- also invalid, since it's built on GBR), and the GBR country-FE
-#     comparison. If any of table_gbr_strict_install_fe.html,
-#     table_price_vs_selfeps_comparison.html, table_market_nonmarket_
-#     institutions.html, or table_nonmarket_country_fe.html have been used
-#     in a draft or shown to Stavins, they need to be pulled -- they no
-#     longer get produced by this script.
+#     entirely along with the "self_eps" index 
 #   - This script previously never loaded df_panel, df_all, or nec_clean
 #     from disk at all -- it assumed all three already existed in-session
 #     from having run 04/05/09 immediately before, in one unbroken R
