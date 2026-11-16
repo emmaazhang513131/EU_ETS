@@ -1,5 +1,43 @@
+# =============================================================================
+# 06_regressions.R
+#
+# Main regressions: ownership x EPS/price/NEC-target interactions by phase,
+# with institutional-quality (corruption, polyarchy) triple interactions.
+#
+# FIXES APPLIED (see chat):
+#   - The fabricated GBR ("General Binding Rules") variable has been removed
+#     entirely -- it was never a real, verifiable policy (Article 17 of
+#     Directive 2010/75/EU is a generic permitting option, not a named
+#     discrete policy with the country list this script invented:
+#     AT/BE/DE/DK/FR/NL/SE). This removed ~190 lines: the GBR-strictness
+#     regressions, the GBR x institutional-quality triple interactions, the
+#     "self_eps" index (an average of price and the fabricated GBR variable
+#     -- also invalid, since it's built on GBR), and the GBR country-FE
+#     comparison. If any of table_gbr_strict_install_fe.html,
+#     table_price_vs_selfeps_comparison.html, table_market_nonmarket_
+#     institutions.html, or table_nonmarket_country_fe.html have been used
+#     in a draft or shown to Stavins, they need to be pulled -- they no
+#     longer get produced by this script.
+#   - This script previously never loaded df_panel, df_all, or nec_clean
+#     from disk at all -- it assumed all three already existed in-session
+#     from having run 04/05/09 immediately before, in one unbroken R
+#     session. Fixed: all three are now loaded via readRDS() at the top.
+#     This requires 04, 05, 07, 08, 09 to have been run at some point
+#     first (in any order, since 05/07/08/09 all read-modify-write the
+#     same df_panel_merged.rds file -- see each script's own header) so
+#     that the saved files below actually contain what this script needs.
+# =============================================================================
+
 library(fixest)
 library(here)
+library(modelsummary)
+library(tidyverse)
+
+df_panel <- readRDS("data/processed/df_panel_merged.rds")
+df_all   <- readRDS("data/processed/df_all_sectors.rds")
+nec_clean <- readRDS("data/processed/nec_clean.rds")
+state_ownership_annual <- readRDS("data/processed/state_ownership_annual.rds")
+sectors_to_plot <- c('Power', 'Refining', 'Steel/Metal', 'Pulp/Paper', 'Cement')
 
 #phase dummies
 
@@ -1269,200 +1307,6 @@ print(slope_at_extremes_pct)
 df_panel %>% filter(v2x_corr > 0.3) %>% distinct(country, year) %>% nrow()
 df_panel %>% filter(v2x_corr > 0.3) %>% distinct(country) %>% pull(country)
 
-# general binding rules
-
-uses_gbr <- c("AT","BE","DE","DK","FR","NL","SE")
-df_panel <- df_panel %>% mutate(gbr_strict = as.integer(country %in% uses_gbr))
-
-
-df_panel <- df_panel %>% mutate(phase3 = as.integer(phase == 3), phase4 = as.integer(phase == 4))
-
-# ── GBR strictness: installation FE, pooled + phase interactions ──────────────
-gbr1 <- feols(log_verified ~ state_ownership_pct_tv |
-                installation_id + year,
-              data = df_panel, cluster = ~bvdId)
-
-gbr2 <- feols(log_verified ~ state_ownership_pct_tv + gbr_strict + v2x_polyarchy |
-                installation_id + year,
-              data = df_panel, cluster = ~bvdId)
-
-gbr3 <- feols(log_verified ~ state_ownership_pct_tv * gbr_strict + v2x_polyarchy |
-                installation_id + year,
-              data = df_panel, cluster = ~bvdId)
-
-gbr_phase <- feols(log_verified ~ 
-                     state_ownership_pct_tv +
-                     state_ownership_pct_tv:phase3 +
-                     state_ownership_pct_tv:phase4 +
-                     state_ownership_pct_tv:gbr_strict +
-                     gbr_strict + v2x_polyarchy |
-                     installation_id + year,
-                   data = df_panel, cluster = ~bvdId)
-
-modelsummary(
-  list('Baseline' = gbr1, '+Policy' = gbr2, '+Interaction' = gbr3, '+Phase' = gbr_phase),
-  coef_map = c(
-    'state_ownership_pct_tv'                  = 'State ownership %',
-    'state_ownership_pct_tv:phase3'           = 'State ownership × Phase 3',
-    'state_ownership_pct_tv:phase4'           = 'State ownership × Phase 4',
-    'state_ownership_pct_tv:gbr_strict'       = 'State ownership × GBR-strict',
-    'gbr_strict'                               = 'Uses General Binding Rules',
-    'v2x_polyarchy'                            = 'V-Dem polyarchy'
-  ),
-  stars = c('*' = 0.1, '**' = 0.05, '***' = 0.01),
-  gof_map = c('nobs', 'r.squared', 'adj.r.squared'),
-  fmt = fmt_decimal(5),
-  title = 'Log verified emissions: GBR strictness (firm-facing non-market proxy)',
-  output = 'output/tables/table_gbr_strict_install_fe.html'
-)
-
-
-
-gbr_triple <- feols(log_verified ~ 
-                      state_ownership_pct_tv +
-                      state_ownership_pct_tv:phase3 +
-                      state_ownership_pct_tv:phase4 +
-                      state_ownership_pct_tv:gbr_strict +
-                      state_ownership_pct_tv:gbr_strict:phase3 +
-                      state_ownership_pct_tv:gbr_strict:phase4 +
-                      gbr_strict + v2x_polyarchy |
-                      installation_id + year,
-                    data = df_panel, cluster = ~bvdId)
-
-summary(gbr_triple)
-
-
-
-# combined index 
-df_panel <- df_panel %>%
-  mutate(
-    price_z = scale(combined_carbon_price)[,1],
-    gbr_z = scale(gbr_strict)[,1],
-    self_eps = (price_z + gbr_z) / 2
-  )
-
-self_eps_triple <- feols(log_verified ~ 
-                           state_ownership_pct_tv +
-                           state_ownership_pct_tv:phase3 +
-                           state_ownership_pct_tv:phase4 +
-                           state_ownership_pct_tv:self_eps +
-                           state_ownership_pct_tv:self_eps:phase3 +
-                           state_ownership_pct_tv:self_eps:phase4 +
-                           self_eps + v2x_polyarchy |
-                           installation_id + year,
-                         data = df_panel, cluster = ~bvdId)
-
-summary(self_eps_triple)
-
-
-modelsummary(
-  list('Price alone' = price_phase_inter_full, 'Price + GBR (self-EPS)' = self_eps_triple),
-  coef_map = c(
-    'state_ownership_pct_tv'                              = 'State ownership %',
-    'state_ownership_pct_tv:phase3'                        = 'Ownership × Phase 3',
-    'state_ownership_pct_tv:phase4'                        = 'Ownership × Phase 4',
-    'state_ownership_pct_tv:combined_carbon_price'         = 'Ownership × Price',
-    'state_ownership_pct_tv:phase3:combined_carbon_price'  = 'Ownership × Price × Phase 3',
-    'state_ownership_pct_tv:phase4:combined_carbon_price'  = 'Ownership × Price × Phase 4',
-    'state_ownership_pct_tv:self_eps'                       = 'Ownership × Self-EPS',
-    'state_ownership_pct_tv:phase3:self_eps'               = 'Ownership × Self-EPS × Phase 3',
-    'state_ownership_pct_tv:phase4:self_eps'               = 'Ownership × Self-EPS × Phase 4',
-    'combined_carbon_price'                                 = 'Combined carbon price',
-    'self_eps'                                              = 'Self-made EPS (price + GBR)',
-    'v2x_polyarchy'                                         = 'V-Dem polyarchy'
-  ),
-  stars = c('*' = 0.1, '**' = 0.05, '***' = 0.01),
-  gof_map = c('nobs', 'r.squared', 'adj.r.squared'),
-  fmt = fmt_decimal(5),
-  title = 'Comparison: price-only vs. combined price+GBR index',
-  output = 'output/tables/table_price_vs_selfeps_comparison.html'
-)
-
-
-# hw they react to democracy and corruptin 
-
-# ── Market mechanism (price) × institutional moderators ───────────────────────
-price_corr <- feols(log_verified ~ state_ownership_pct_tv * combined_carbon_price * v2x_corr |
-                      installation_id + year, data = df_panel, cluster = ~bvdId)
-
-price_dem <- feols(log_verified ~ state_ownership_pct_tv * combined_carbon_price * v2x_polyarchy |
-                     installation_id + year, data = df_panel, cluster = ~bvdId)
-
-# ── Non-market mechanism (GBR) × institutional moderators ─────────────────────
-gbr_corr <- feols(log_verified ~ state_ownership_pct_tv * gbr_strict * v2x_corr |
-                    installation_id + year, data = df_panel, cluster = ~bvdId)
-
-gbr_dem <- feols(log_verified ~ state_ownership_pct_tv * gbr_strict * v2x_polyarchy |
-                   installation_id + year, data = df_panel, cluster = ~bvdId)
-
-modelsummary(
-  list(
-    'Price × Corruption' = price_corr,
-    'Price × Democracy'  = price_dem,
-    'GBR × Corruption'   = gbr_corr,
-    'GBR × Democracy'    = gbr_dem
-  ),
-  coef_map = c(
-    'state_ownership_pct_tv'                              = 'State ownership %',
-    'state_ownership_pct_tv:combined_carbon_price'        = 'Ownership × Price',
-    'state_ownership_pct_tv:v2x_corr'                     = 'Ownership × Corruption',
-    'state_ownership_pct_tv:v2x_polyarchy'                = 'Ownership × Democracy',
-    'state_ownership_pct_tv:combined_carbon_price:v2x_corr'    = 'Ownership × Price × Corruption',
-    'state_ownership_pct_tv:combined_carbon_price:v2x_polyarchy' = 'Ownership × Price × Democracy',
-    'state_ownership_pct_tv:gbr_strict'                    = 'Ownership × GBR',
-    'state_ownership_pct_tv:gbr_strict:v2x_corr'          = 'Ownership × GBR × Corruption',
-    'state_ownership_pct_tv:gbr_strict:v2x_polyarchy'     = 'Ownership × GBR × Democracy',
-    'combined_carbon_price'                                = 'Combined carbon price',
-    'gbr_strict'                                           = 'Uses GBR',
-    'v2x_corr'                                             = 'Corruption (V-Dem)',
-    'v2x_polyarchy'                                        = 'V-Dem polyarchy'
-  ),
-  stars = c('*' = 0.1, '**' = 0.05, '***' = 0.01),
-  gof_map = c('nobs', 'r.squared', 'adj.r.squared'),
-  fmt = fmt_decimal(5),
-  title = 'Market vs. non-market stringency: interaction with institutional quality',
-  output = 'output/tables/table_market_nonmarket_institutions.html'
-)
-
-
-# ── reload and rebuild what you need ───────────────────────────────────────────
-library(tidyverse); library(fixest); library(modelsummary)
-
-df_panel <- readRDS("data/processed/df_panel_merged.rds") %>%
-  mutate(phase3 = as.integer(phase == 3), phase4 = as.integer(phase == 4))
-
-uses_gbr <- c("AT","BE","DE","DK","FR","NL","SE")
-
-df_panel <- df_panel %>%
-  mutate(gbr_strict = as.integer(country %in% uses_gbr))
-
-# ── NEW: country FE instead of installation FE, so the direct effect of 
-# country-fixed policy variables (NEC target, GBR) is actually estimable ──────
-
-nox_country <- feols(log_verified ~ state_ownership_pct_tv * nox_target_2020_29 + v2x_polyarchy |
-                       registry_id + year,
-                     data = df_panel, cluster = ~bvdId)
-
-gbr_country <- feols(log_verified ~ state_ownership_pct_tv * gbr_strict + v2x_polyarchy |
-                       registry_id + year,
-                     data = df_panel, cluster = ~bvdId)
-
-modelsummary(
-  list('NOx target (country FE)' = nox_country, 'GBR strict (country FE)' = gbr_country),
-  coef_map = c(
-    'state_ownership_pct_tv'                     = 'State ownership %',
-    'nox_target_2020_29'                          = 'NOx reduction target',
-    'state_ownership_pct_tv:nox_target_2020_29'  = 'Ownership × NOx target',
-    'gbr_strict'                                   = 'Uses GBR',
-    'state_ownership_pct_tv:gbr_strict'           = 'Ownership × GBR',
-    'v2x_polyarchy'                                = 'V-Dem polyarchy'
-  ),
-  stars = c('*' = 0.1, '**' = 0.05, '***' = 0.01),
-  gof_map = c('nobs', 'r.squared', 'adj.r.squared'),
-  fmt = fmt_decimal(5),
-  title = 'Country FE: direct effect of non-market policy instruments',
-  output = 'output/tables/table_nonmarket_country_fe.html'
-)
 
 
 
