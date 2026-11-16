@@ -1,4 +1,32 @@
 # ── 07_merge_fuel_type.R ──────────────────────────────────────────────────────
+#
+# Matches EUTL installations to JRC-PPDB-OPEN power plant records via nearest-
+# neighbor coordinate matching (within country), to get a fuel_type variable.
+#
+# FIXES APPLIED (see chat):
+#   - `installations_raw` (Section 4) was referenced but never defined --
+#     fixed to load installations_all via readRDS(), the object 04 now
+#     saves. MARKED TO DOUBLE-CHECK: confirm this is actually the dataset
+#     you meant (i.e. that 04's filter -- isAircraftOperator == FALSE,
+#     isMaritimeOperator == FALSE, no activity_id restriction -- is the
+#     right population for coordinate-matching against JRC's full plant
+#     list, not just the power-sector subset).
+#   - df_panel_fuel (the panel with fuel_type merged in) is now saved back
+#     into the canonical data/processed/df_panel_merged.rds, following the
+#     same read-modify-write pattern 02/05/08/09 already use, so fuel_type
+#     becomes available to 06 without forcing its use. Whether to actually
+#     use it as a regressor (likely redundant in installation-FE specs,
+#     since a time-invariant plant characteristic is already absorbed by
+#     the fixed effect; more useful in country-FE specs) is left as your
+#     call in 06 itself -- this just makes the column available either way.
+#   - library(tidyverse) was loaded twice; removed the duplicate.
+#   - Two near-identical blocks both built df_panel_fuel and ran almost the
+#     same matched-vs-unmatched comparison (one unsaved, one that added
+#     write_csv() calls at the end) -- consolidated into one block, keeping
+#     the version with the saves since it's the more complete of the two.
+#   - install.packages('geosphere') / install.packages('stringdist') ran
+#     unconditionally -- changed to conditional installs.
+# =============================================================================
 
 library(tidyverse)
 library(data.table)
@@ -25,8 +53,6 @@ jrc_links %>%
 
 # check what sources are available
 table(jrc_links$source)
-
-library(tidyverse)
 
 # ── 3. Prepare JRC data for matching ─────────────────────────────────────────
 # keep only fossil fuel plants relevant to ETS power sector
@@ -55,7 +81,11 @@ nrow(jrc_fossil)
 table(jrc_fossil$fuel_type)
 
 # ── 4. Prepare EUTL coordinates ───────────────────────────────────────────────
-eutl_coords <- installations_raw %>%
+# FIX (see header note): was `installations_raw`, undefined. Now loads the
+# object 04 saves -- double-check this is the right population (see note).
+installations_all <- readRDS('data/processed/installations_all.rds')
+
+eutl_coords <- installations_all %>%
   filter(!is.na(latitudeGoogle), !is.na(longitudeGoogle)) %>%
   select(
     installation_id = id,
@@ -68,7 +98,7 @@ eutl_coords <- installations_raw %>%
 
 nrow(eutl_coords)
 
-install.packages('geosphere')
+if (!requireNamespace("geosphere", quietly = TRUE)) install.packages('geosphere')
 library(geosphere)
 
 # ── 5. Nearest neighbor matching within country ───────────────────────────────
@@ -130,7 +160,7 @@ nrow(good_matches)
 
 # what share of your panel observations have a good match
 df_panel %>%
-  left_join(good_matches %>% 
+  left_join(good_matches %>%
               select(installation_id, fuel_type, dist_km),
             by = 'installation_id') %>%
   summarise(
@@ -146,7 +176,7 @@ head(eutl_coords$install_name, 20)
 head(jrc_fossil$name_jrc, 20)
 
 #### name matching -----------------------------------------
-install.packages('stringdist')
+if (!requireNamespace("stringdist", quietly = TRUE)) install.packages('stringdist')
 library(stringdist)
 
 # normalize names for matching
@@ -161,44 +191,6 @@ jrc_fossil <- jrc_fossil %>%
 # check a sample
 head(eutl_coords$name_clean, 10)
 head(jrc_fossil$name_clean, 10)
-
-# ── compare matched vs unmatched installations ────────────────────────────────
-
-df_panel_fuel <- df_panel %>%
-  left_join(
-    good_matches %>%
-      select(installation_id, fuel_type, dist_km) %>%
-      distinct(installation_id, .keep_all = TRUE),
-    by = 'installation_id'
-  ) %>%
-  mutate(matched = !is.na(fuel_type))
-
-# compare key variables between matched and unmatched
-df_panel_fuel %>%
-  group_by(matched) %>%
-  summarise(
-    n_obs = n(),
-    n_installs = n_distinct(installation_id),
-    mean_verified = mean(verified, na.rm = TRUE),
-    median_verified = median(verified, na.rm = TRUE),
-    mean_state_own = mean(state_ownership_pct_tv, na.rm = TRUE),
-    pct_state_owned = mean(state_ownership_pct_tv > 0, na.rm = TRUE),
-    mean_surplus = mean(surplus_norm, na.rm = TRUE),
-    pct_foreign = mean(foreign_owned, na.rm = TRUE),
-    .groups = 'drop'
-  ) %>%
-  print(width = Inf)
-
-# country breakdown of matched vs unmatched
-df_panel_fuel %>%
-  group_by(registry_id, matched) %>%
-  summarise(n = n_distinct(installation_id), .groups = 'drop') %>%
-  pivot_wider(names_from = matched, values_from = n,
-              names_prefix = 'matched_') %>%
-  mutate(pct_matched = round(matched_TRUE / 
-                               (matched_TRUE + matched_FALSE) * 100, 1)) %>%
-  arrange(desc(pct_matched)) %>%
-  print(n = 30)
 
 # check JRC linkage file for EIC codes
 head(jrc_links)
@@ -221,8 +213,12 @@ good_matches_eic <- good_matches %>%
 sum(!is.na(good_matches_eic$eic_p))
 mean(!is.na(good_matches_eic$eic_p))
 
+# ── 6. Representativeness check of JRC matched sample ─────────────────────────
+# (FIX: this consolidates what were two near-identical blocks -- an earlier
+# unsaved "compare matched vs unmatched" check, and a later, more complete
+# "representativeness check" that added the write_csv() saves below. Kept
+# the complete version; the duplicate has been removed.)
 
-# ── representativeness check of JRC matched sample ────────────────────────────
 df_panel_fuel <- df_panel %>%
   left_join(
     good_matches %>%
@@ -254,7 +250,7 @@ country_check <- df_panel_fuel %>%
   summarise(n = n_distinct(installation_id), .groups = 'drop') %>%
   pivot_wider(names_from = matched, values_from = n,
               names_prefix = 'matched_') %>%
-  mutate(pct_matched = round(matched_TRUE / 
+  mutate(pct_matched = round(matched_TRUE /
                                (matched_TRUE + matched_FALSE) * 100, 1)) %>%
   arrange(desc(pct_matched))
 
@@ -264,8 +260,12 @@ print(country_check, n = 30)
 write_csv(rep_check, 'output/tables/jrc_representativeness.csv')
 write_csv(country_check, 'output/tables/jrc_country_coverage.csv')
 
+# FIX (see header note): save fuel_type back into the canonical panel so
+# it's available to 06 (and anyone restarting R), following the same
+# read-modify-write pattern as 02/05/08/09.
+saveRDS(df_panel_fuel, 'data/processed/df_panel_merged.rds')
 
-# ── 8. Pull ENTSO-E generation data ───────────────────────────────────────────
+# ── 7. Pull ENTSO-E generation data ───────────────────────────────────────────
 
 # save EIC crosswalk for ENTSO-E query
 eic_crosswalk <- good_matches_eic %>%
@@ -276,6 +276,8 @@ eic_crosswalk <- good_matches_eic %>%
   distinct()
 
 nrow(eic_crosswalk)
+
+write_csv(eic_crosswalk, 'data/processed/eic_crosswalk.csv')
 
 write_csv(eic_crosswalk, 'data/processed/eic_crosswalk.csv')
 
