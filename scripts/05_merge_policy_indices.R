@@ -1,9 +1,33 @@
+# =============================================================================
+# 05_merge_policy_indices.R
+#
+# Merges OECD EPS and V-Dem institutional-quality indices into both df_panel
+# (power sector) and df_all (all sectors, from 04).
+#
+# FIXES APPLIED (see chat):
+#   - df_all and sectors_to_plot were used throughout this script but never
+#     loaded/defined here -- they only existed if 04 had been run in the
+#     same session immediately before. Fixed: df_all now loads via
+#     readRDS() at the top (requires 04 to have been run at some point and
+#     saved its output -- see 04's own header), and sectors_to_plot is
+#     redefined locally (it's just a 5-item constant, not worth persisting
+#     as its own file).
+#   - This script never saved its output at all -- the EPS/V-Dem merge into
+#     both df_panel and df_all was lost the moment the R session ended.
+#     Fixed: both are saved via saveRDS() at the end, df_panel back to the
+#     canonical data/processed/df_panel_merged.rds (same file 02/08/09
+#     read-modify-write), df_all to its own sectors file.
+# =============================================================================
+
 # ── 1. Load packages ───────────────────────────────────────────────────────────
 library(tidyverse)
 library(data.table)
+library(corrplot)
 
-# ── 2. Load panel ─────────────────────────────────────────────────────────────
+# ── 2. Load panel(s) ───────────────────────────────────────────────────────────
 df_panel <- readRDS('data/processed/df_panel_merged.rds')
+df_all   <- readRDS('data/processed/df_all_sectors.rds')
+sectors_to_plot <- c('Power', 'Refining', 'Steel/Metal', 'Pulp/Paper', 'Cement')
 
 # ── 3. Load OECD EPS ──────────────────────────────────────────────────────────
 eps_raw <- fread('data/raw/oecd.EPS.csv')
@@ -18,7 +42,7 @@ vdem_raw <- fread('data/raw/V-Dem-CY-Core-v16.csv')
 glimpse(vdem_raw)
 names(vdem_raw) %>% head(30)
 
-# ── 3. Clean OECD EPS ─────────────────────────────────────────────────────────
+# ── 5. Clean OECD EPS ─────────────────────────────────────────────────────────
 eps_clean <- eps_raw %>%
   filter(CLIM_POL == 'EPS') %>%
   select(
@@ -32,7 +56,7 @@ eps_clean <- eps_raw %>%
 unique(eps_clean$country_iso3)
 nrow(eps_clean)
 
-# ── 4. Clean V-Dem ────────────────────────────────────────────────────────────
+# ── 6. Clean V-Dem ────────────────────────────────────────────────────────────
 vdem_clean <- vdem_raw %>%
   select(
     country_iso3  = country_text_id,
@@ -43,7 +67,7 @@ vdem_clean <- vdem_raw %>%
   ) %>%
   filter(year >= 2008, year <= 2023)
 
-# ── 5. Merge both into df_panel ───────────────────────────────────────────────
+# ── 7. Merge both into df_panel ───────────────────────────────────────────────
 # need ISO3 country code in df_panel — currently have ISO2 in registry_id
 # create ISO3 lookup
 iso_lookup <- c(
@@ -132,16 +156,16 @@ png('output/figures/20_correlation_matrix_by_sector_full.png',
 par(mfrow = c(2, 3))
 
 for (s in sectors_to_plot) {
-  
+
   cor_data <- df_all %>%
     filter(sector == s) %>%
     select(surplus_norm, log_verified,
            state_ownership_pct, state_owned_binary,
            foreign_owned, eps, v2x_polyarchy) %>%
     drop_na()
-  
+
   n_obs <- nrow(cor_data)
-  
+
   if (n_obs > 50) {
     cor_mat <- cor(cor_data)
     corrplot(cor_mat,
@@ -222,4 +246,10 @@ df_all %>%
     n_firms = n_distinct(bvdId)
   ) %>%
   arrange(desc(n_firms))
+
+# FIX (see chat): saved so 06_regressions.R (and anyone restarting R) can
+# load these with eps/v2x_polyarchy/v2x_corr already merged, instead of
+# requiring 05 to have run in the same unbroken session.
+saveRDS(df_panel, 'data/processed/df_panel_merged.rds')
+saveRDS(df_all, 'data/processed/df_all_sectors.rds')
 
